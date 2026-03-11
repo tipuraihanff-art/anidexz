@@ -58,7 +58,7 @@ export default function Header({ onSearch, onRandom }) {
     { v: 'browse', label: 'Browse' },
     { v: 'mylist', label: '♥ My List' },
     { v: 'community', label: 'Community' },
-    { v: 'domains', label: '🌐 Domains' },
+    { v: 'domains', label: 'Domains' },
   ]
 
   const years = []
