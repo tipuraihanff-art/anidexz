@@ -102,18 +102,18 @@ export function Q_DETAIL() {
 }
 
 export function Q_SUGGEST() {
-  return `query($search:String){
-    Page(page:1 perPage:5){
-      media(type:ANIME search:$search genre_not_in:["Hentai"] sort:SEARCH_MATCH){
-        id title{romaji english}
-        coverImage{medium}
-        format status
-      }
-    }
-  }`
+  return `query($search:String){
+    Page(page:1 perPage:5){
+      media(type:ANIME search:$search genre_not_in:["Hentai"] sort:SEARCH_MATCH){
+        id title{romaji english}
+        coverImage{medium}
+        format status
+      }
+    }
+  }`
 }
 
-
+export function Q_BY_MAL_IDS() {
   return `query($ids:[Int] $page:Int $perPage:Int){
     Page(page:$page perPage:$perPage){
       media(type:ANIME idMal_in:$ids genre_not_in:["Hentai"]){
