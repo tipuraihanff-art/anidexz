@@ -167,7 +167,6 @@ export async function fetchLatestReleasedWithAniListIds() {
     const d = await fetchJikanRecentEpisodes()
     const items = (d.data || []).slice(0, 30)
 
-    // Build flat list of { malId, title, img, epNum, epTitle }
     const cards = []
     const seenMal = new Set()
     for (const item of items) {
@@ -176,8 +175,6 @@ export async function fetchLatestReleasedWithAniListIds() {
       const eps = (item.episodes || []).filter(e => !e.premium)
       for (let i = 0; i < Math.min(eps.length, 2); i++) {
         const ep = eps[i]
-        // ep.mal_id is the episode page ID (huge number), NOT ep number
-        // Parse episode number from title like "Episode 5" or fall back to index+1
         let epNum = 1
         if (ep.title) {
           const m = ep.title.match(/(\d+)/)
@@ -198,7 +195,6 @@ export async function fetchLatestReleasedWithAniListIds() {
 
     if (!cards.length) return []
 
-    // Lookup AniList IDs for all unique MAL IDs
     const malIds = [...seenMal]
     try {
       const alData = await alQuery(Q_BY_MAL_IDS(), { ids: malIds, page: 1, perPage: malIds.length })
@@ -214,19 +210,15 @@ export async function fetchLatestReleasedWithAniListIds() {
   }
 }
 
-/* Fetch recently updated anime via Jikan (for Recently Updated section)
-   Returns AniList-compatible media objects by looking up MAL IDs in AniList */
+/* Fetch recently updated anime via Jikan (for Recently Updated section) */
 export async function fetchRecentlyUpdatedViaJikan() {
   try {
     const d = await fetchJikanRecentEpisodes()
     const items = (d.data || []).slice(0, 30)
-    // Extract unique MAL IDs
     const malIds = [...new Set(items.map(i => i?.entry?.mal_id).filter(Boolean))]
     if (!malIds.length) return []
-    // Fetch AniList data for these MAL IDs
     const data = await alQuery(Q_BY_MAL_IDS(), { ids: malIds, page: 1, perPage: 30 })
     const alMedia = (data?.Page?.media) || []
-    // Sort by original Jikan order (most recently aired first)
     const malOrder = {}
     malIds.forEach((id, i) => { malOrder[id] = i })
     alMedia.sort((a, b) => (malOrder[a.idMal] ?? 99) - (malOrder[b.idMal] ?? 99))
@@ -236,32 +228,31 @@ export async function fetchRecentlyUpdatedViaJikan() {
   }
 }
 
-/* ── Episode list via Jikan ── */
-export async function loadEpisodes(malId) {
-  if (!malId) return [1]
-  async function fetchPage(page, acc) {
+/* ── AniDexz API ── */
+const ANIDEXZ = 'https://anidexz-episode-id.onrender.com/api/episode'
+
+/* ── Episode list — uses AniDexz totalEpisodes (aired episodes only) ── */
+export async function loadEpisodes(title, titleAlt) {
+  if (!title && !titleAlt) return [1]
+  const titles = [title, titleAlt].filter(Boolean)
+  for (const t of titles) {
     try {
-      const r = await fetch(`${JIKAN}/anime/${malId}/episodes?page=${page}`)
-      const d = r.ok ? await r.json() : { data: [], pagination: { has_next_page: false } }
-      const all = [...acc, ...(d.data || [])]
-      if (d.pagination?.has_next_page && page < 5) {
-        await new Promise(res => setTimeout(res, 350))
-        return fetchPage(page + 1, all)
-      }
-      return all
+      const url = `${ANIDEXZ}?title=${encodeURIComponent(t)}&ep=1`
+      const r = await fetch(url, { cache: 'no-store' })
+      if (!r.ok) continue
+      const d = await r.json()
+      if (!d.totalEpisodes || d.totalEpisodes < 1) continue
+      // Returns [1, 2, 3, ... totalEpisodes] — only aired episodes
+      return Array.from({ length: d.totalEpisodes }, (_, i) => i + 1)
     } catch {
-      return acc
+      continue
     }
   }
-  const eps = await fetchPage(1, [])
-  if (!eps.length) return [1]
-  return eps.map(e => e.mal_id || e.episode_id || 1)
+  return [1]
 }
 
 /* ── Player resolution ── */
 import { _c } from './helpers.js'
-
-const ANIDEXZ = 'https://anidexz-episode-id.onrender.com/api/episode'
 
 export async function resolveEpId(name, alt, ep) {
   const titles = [name, alt].filter(Boolean)
