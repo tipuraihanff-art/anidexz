@@ -259,42 +259,26 @@ export async function loadEpisodes(malId) {
 }
 
 /* ── Player resolution ── */
-import { _b, _c, slugVariants } from './helpers.js'
+import { _c } from './helpers.js'
 
-function parseEpResponse(d) {
-  if (d?.contents) { try { d = JSON.parse(d.contents) } catch {} }
-  const id = d && (d.episode_id || d.episodeId || d.epId || d.id)
-  if (id) return String(id)
-  throw new Error(d?.message ? d.message : 'Episode not found')
-}
+const ANIDEXZ = 'https://anidexz-episode-id.onrender.com/api/episode'
 
-function fetchDirect(slug, ep) {
-  return fetch(`${_b}?name=${slug}&episode=${ep}`, { cache: 'no-store' })
-    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
-    .then(parseEpResponse)
-}
-
-function fetchViaProxy(slug, ep, base) {
-  return fetch(base + encodeURIComponent(`${_b}?name=${slug}&episode=${ep}`), { cache: 'no-store' })
-    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
-    .then(parseEpResponse)
-}
-
-function fetchEpId(slug, ep) {
-  return fetchDirect(slug, ep)
-    .catch(() => fetchViaProxy(slug, ep, 'https://api.allorigins.win/raw?url='))
-    .catch(() => fetchViaProxy(slug, ep, 'https://corsproxy.io/?'))
-}
-
-export function resolveEpId(name, alt, ep) {
-  const variants = slugVariants(name, alt)
-  let i = 0
-  function next() {
-    if (i >= variants.length) return Promise.reject(new Error('Episode not available'))
-    const v = variants[i++]
-    return fetchEpId(v, ep).catch(() => next())
+export async function resolveEpId(name, alt, ep) {
+  const titles = [name, alt].filter(Boolean)
+  let lastErr
+  for (const title of titles) {
+    try {
+      const url = `${ANIDEXZ}?title=${encodeURIComponent(title)}&ep=${ep}`
+      const r = await fetch(url, { cache: 'no-store' })
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      const d = await r.json()
+      if (!d.episodeId) throw new Error(d.error || 'No episode ID returned')
+      return String(d.episodeId)
+    } catch (err) {
+      lastErr = err
+    }
   }
-  return next()
+  throw lastErr || new Error('Episode not available')
 }
 
 export { _c }
