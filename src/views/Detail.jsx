@@ -51,7 +51,7 @@ function Countdown({ nep }) {
 }
 
 /* ── Episode section ── */
-function EpisodeSection({ malId, alId, animeId, name, titleAlt }) {
+function EpisodeSection({ animeId, name, titleAlt }) {
   const { go, route } = useApp()
   const [eps, setEps] = useState([])
   const [lang, setLang] = useState(route.lang || 'sub')
@@ -60,8 +60,8 @@ function EpisodeSection({ malId, alId, animeId, name, titleAlt }) {
   const CHUNK = 100
 
   useEffect(() => {
-    loadEpisodes(malId).then(list => { setEps(list); setLoading(false) })
-  }, [malId])
+    loadEpisodes(name, titleAlt).then(list => { setEps(list); setLoading(false) })
+  }, [name, titleAlt])
 
   if (loading) return <Spin />
 
@@ -253,7 +253,7 @@ export default function Detail() {
 
         {/* Episodes */}
         <div className={'tab-panel' + (activeTab === 'tab-eps' ? ' on' : '')}>
-          <EpisodeSection malId={m.idMal} alId={id} animeId={m.id} name={title} titleAlt={titleAlt} />
+          <EpisodeSection animeId={m.id} name={title} titleAlt={titleAlt} />
         </div>
 
         {/* Characters */}
