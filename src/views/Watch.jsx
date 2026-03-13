@@ -79,7 +79,7 @@ export default function Watch() {
         const title = alTitle(m)
         const titleAlt = alTitleAlt(m)
         const poster = alImg(m)
-        return loadEpisodes(m.idMal).then(eps => {
+        return loadEpisodes(title, titleAlt).then(eps => {
           setMeta({ title, titleAlt, poster, eps })
           saveCW(id, ep, lang, title, titleAlt, poster)
           document.title = `${title} - Episode ${ep} - anidexz`
