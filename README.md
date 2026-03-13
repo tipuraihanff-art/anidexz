@@ -1,6 +1,6 @@
 # anidexz — React + Vite
 
-Exact 1:1 conversion of the original anidexz Blogger site to React + Vit
+Exact 1:1 conversion of the original anidexz Blogger site to React + Vite
 ## Changes from original:
 - **Hentai filtered**: `genre_not_in:["Hentai"]` added to all AniList queries. Adult anime (Overflow, Redo of Healer, etc.) still shows — only the Hentai genre tag is excluded.
 - **Recently Updated** now uses Jikan API to show anime ordered by latest episode release dates (fetches recent Jikan episodes → maps to AniList for proper card display).
