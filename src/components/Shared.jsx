@@ -85,13 +85,11 @@ export function Card({ m, delay = 0 }) {
         onError={e => { e.target.src = 'https://placehold.co/300x420/0d0d15/555577?text=N/A' }}
       />
       {cwEntry && (
-        <>
-          <div className="card-prog">
-            <div className="card-prog-fill" style={{ width: progPct + '%' }} />
-          </div>
-          <div className="card-prog-ep">EP {watchedEp}{totalEps > 1 ? `/${totalEps}` : ''}</div>
-        </>
-      )}      <div className="cov">
+        <div className="card-prog">
+          <div className="card-prog-fill" style={{ width: progPct + '%' }} />
+        </div>
+      )}
+      <div className="cov">
         <p className="ctitle">{title}</p>
         <span className="cwbtn">▶ Watch</span>
       </div>
