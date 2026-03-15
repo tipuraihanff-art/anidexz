@@ -3,7 +3,6 @@
   <h3>Watch anime online. Free. Fast. No ads.</h3>
 
   [![Live Demo](https://img.shields.io/badge/Live%20Demo-anidexz.vercel.app-10b981?style=flat-square&logo=vercel&logoColor=white)](https://anidexz.vercel.app)
-  [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/tipuraihanff-art/anidexz&env=VITE_EPISODE_MAPPER_URL)
   [![Stars](https://img.shields.io/github/stars/tipuraihanff-art/anidexz?style=flat-square&color=7c3aed&labelColor=0d0d15&label=Stars)](https://github.com/tipuraihanff-art/anidexz/stargazers)
   [![Forks](https://img.shields.io/github/forks/tipuraihanff-art/anidexz?style=flat-square&color=7c3aed&labelColor=0d0d15&label=Forks)](https://github.com/tipuraihanff-art/anidexz/forks)
   [![Issues](https://img.shields.io/github/issues/tipuraihanff-art/anidexz?style=flat-square&color=ef4444&labelColor=0d0d15&label=Issues)](https://github.com/tipuraihanff-art/anidexz/issues)
