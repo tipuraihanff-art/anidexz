@@ -98,6 +98,10 @@ export function fromURL() {
     '/anime':      'anime',
     '/community':  'community',
     '/domains':    'domains',
+    '/upcoming':   'upcoming',
+   '/completed':  'completed',
+   '/season':     'season',
+   '/top10':      'top10',
   }
   const view = PATH_VIEW[pathname] || PATH_VIEW[pathname.replace(/\/$/, '')] || 'landing'
   return { view, id: null, name: null, titleAlt: null, ep: null, lang: 'sub', q: '' }
