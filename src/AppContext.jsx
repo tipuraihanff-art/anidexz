@@ -25,6 +25,11 @@ export function buildURL(s) {
     case 'browse':    return '/browse'
     case 'community': return '/community'
     case 'domains':   return '/domains'
+    // 👇 ADD THESE
+    case 'upcoming':  return '/upcoming'
+    case 'completed': return '/completed'
+    case 'season':    return '/season'
+    case 'top10':     return '/top10'
     case 'search':    return s.q ? `/search?q=${encodeURIComponent(s.q)}` : '/search'
     case 'anime': {
       const slug = toSlug(s.name || s.titleAlt || '')
@@ -44,7 +49,6 @@ export function buildURL(s) {
 
 /* ── Parse URL → route state ── */
 export function fromURL() {
-  // Prefer history.state (set by pushState — survives refresh via Vercel rewrite)
   const st = history.state
   if (st && st.view) return st
 
@@ -99,9 +103,9 @@ export function fromURL() {
     '/community':  'community',
     '/domains':    'domains',
     '/upcoming':   'upcoming',
-   '/completed':  'completed',
-   '/season':     'season',
-   '/top10':      'top10',
+    '/completed':  'completed',
+    '/season':     'season',
+    '/top10':      'top10',
   }
   const view = PATH_VIEW[pathname] || PATH_VIEW[pathname.replace(/\/$/, '')] || 'landing'
   return { view, id: null, name: null, titleAlt: null, ep: null, lang: 'sub', q: '' }
