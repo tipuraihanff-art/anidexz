@@ -12,10 +12,15 @@ import MyList from './views/MyList.jsx'
 import Browse from './views/Browse.jsx'
 import Detail from './views/Detail.jsx'
 import Watch from './views/Watch.jsx'
-
 import Domains from './views/Domains.jsx'
 
-/* ── Context menu + devtools block (matches original) ── */
+// 👇 NEW IMPORTS
+import Upcoming from './views/Upcoming.jsx'
+import Completed from './views/Completed.jsx'
+import Season from './views/Season.jsx'
+import Top10 from './views/Top10.jsx'
+
+/* ── Context menu + devtools block ── */
 if (typeof document !== 'undefined') {
   document.addEventListener('contextmenu', e => e.preventDefault())
   document.onkeydown = e => {
@@ -55,7 +60,7 @@ function AppInner() {
   const [showBtt, setShowBtt] = useState(false)
   const view = route.view
 
-  /* Update page title on route change (Detail/Watch set their own) */
+  /* Update page title on route change */
   useEffect(() => {
     const titles = {
       landing:   'anidexz - Watch Anime Online',
@@ -69,6 +74,11 @@ function AppInner() {
       search:    'Search - anidexz',
       community: 'Community - anidexz',
       domains:   'Domains - anidexz',
+      // 👇 NEW TITLES
+      upcoming:  'Most Anticipated - anidexz',
+      completed: 'Completed Series - anidexz',
+      season:    'This Season - anidexz',
+      top10:     'Top 10 Today - anidexz',
     }
     if (titles[view]) document.title = titles[view]
   }, [view])
@@ -77,7 +87,6 @@ function AppInner() {
   useEffect(() => {
     function onPop(e) {
       const state = e.state || fromURL()
-      // setRoute directly via popstate
       window.dispatchEvent(new CustomEvent('app-popstate', { detail: state }))
     }
     window.addEventListener('popstate', onPop)
@@ -126,6 +135,11 @@ function AppInner() {
       case 'watch':     return <Watch />
       case 'search':    return <Search />
       case 'domains':   return <Domains />
+      // 👇 NEW PAGES
+      case 'upcoming':  return <Upcoming />
+      case 'completed': return <Completed />
+      case 'season':    return <Season />
+      case 'top10':     return <Top10 />
       default:          return <Home />
     }
   }
@@ -164,7 +178,7 @@ function AppInner() {
   )
 }
 
-/* ── Popstate handler that updates context ── */
+/* ── Popstate handler ── */
 function PopstateHandler() {
   const { setRoute } = useApp()
   useEffect(() => {
