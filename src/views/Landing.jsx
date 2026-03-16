@@ -59,7 +59,7 @@ export default function Landing() {
             <button className="lnd-watchbtn" onClick={() => go('home')}>Watch anime</button>
           </div>
           <div className="lnd-card-right">
-            <img className="lnd-hero-img" src="https://iili.io/qA6kw1p.jpg" alt="" />
+            <img className="lnd-hero-img" src="https://iili.io/qMIDlzF.png" alt="" />
           </div>
         </div>
       </div>
