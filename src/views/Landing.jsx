@@ -80,17 +80,23 @@ export default function Landing() {
             <button className="lnd-watchbtn" onClick={() => go('home')}>Watch anime</button>
           </div>
 
-          {/* RIGHT SIDE - OLD IMAGE WITH FIXED SIZE (no stretching anymore) */}
-          <div className="lnd-card-right">
+          {/* RIGHT SIDE - OLD IMAGE (NOW PROPERLY SIZED - NO HERO STRETCH) */}
+          <div 
+            className="lnd-card-right" 
+            style={{ 
+              maxWidth: '420px',     // ← capped width
+              flexShrink: 0 
+            }}
+          >
             <img 
               className="lnd-hero-img" 
               src="https://iili.io/qMIDlzF.png" 
               alt="Anime Hero"
               style={{
-                maxWidth: '520px',      // ← This stops it from being too big
-                width: '100%',          // responsive on smaller screens
+                width: '100%',
                 height: 'auto',
-                objectFit: 'contain',   // keeps proportions perfect
+                maxHeight: '480px',      // ← prevents tall stretching
+                objectFit: 'contain',
                 display: 'block'
               }}
             />
