@@ -32,7 +32,7 @@ export default function Landing() {
         <button className="lnd-nl" onClick={() => go('domains')}>Domains</button>
       </nav>
 
-      {/* HERO SECTION WITH NEW BACKGROUND IMAGE */}
+      {/* HERO - NEW IMAGE AS BACKGROUND + OLD IMAGE ON THE RIGHT SIDE */}
       <div 
         className="lnd-hero"
         style={{
@@ -43,7 +43,7 @@ export default function Landing() {
         }}
       >
         <div className="lnd-card">
-          {/* Only left side kept (search + content). Right image removed completely */}
+          {/* Left side - Search section */}
           <div className="lnd-card-left">
             <div className="lnd-logo"><b>ani</b>dexz</div>
             
@@ -78,6 +78,15 @@ export default function Landing() {
             </div>
 
             <button className="lnd-watchbtn" onClick={() => go('home')}>Watch anime</button>
+          </div>
+
+          {/* RIGHT SIDE - OLD HERO IMAGE (exactly what you wanted) */}
+          <div className="lnd-card-right">
+            <img 
+              className="lnd-hero-img" 
+              src="https://iili.io/qMIDlzF.png" 
+              alt="Anime Hero" 
+            />
           </div>
         </div>
       </div>
