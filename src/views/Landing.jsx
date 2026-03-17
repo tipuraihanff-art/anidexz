@@ -32,7 +32,7 @@ export default function Landing() {
         <button className="lnd-nl" onClick={() => go('domains')}>Domains</button>
       </nav>
 
-      {/* HERO - NEW IMAGE AS BACKGROUND + OLD IMAGE ON THE RIGHT SIDE */}
+      {/* HERO - NEW BACKGROUND + OLD IMAGE (SIZE FIXED - NO MORE STRETCHING) */}
       <div 
         className="lnd-hero"
         style={{
@@ -80,12 +80,19 @@ export default function Landing() {
             <button className="lnd-watchbtn" onClick={() => go('home')}>Watch anime</button>
           </div>
 
-          {/* RIGHT SIDE - OLD HERO IMAGE (exactly what you wanted) */}
+          {/* RIGHT SIDE - OLD IMAGE WITH FIXED SIZE (no stretching anymore) */}
           <div className="lnd-card-right">
             <img 
               className="lnd-hero-img" 
               src="https://iili.io/qMIDlzF.png" 
-              alt="Anime Hero" 
+              alt="Anime Hero"
+              style={{
+                maxWidth: '520px',      // ← This stops it from being too big
+                width: '100%',          // responsive on smaller screens
+                height: 'auto',
+                objectFit: 'contain',   // keeps proportions perfect
+                display: 'block'
+              }}
             />
           </div>
         </div>
