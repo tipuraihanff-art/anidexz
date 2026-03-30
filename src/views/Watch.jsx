@@ -13,22 +13,40 @@ async function fetchEpisodes(animeId) {
   return res.json()
 }
 
-async function fetchServers(animeId, episodeId) {
-  const id = `${animeId}?ep=${episodeId}`
-  const res = await fetch(`${BASE}/servers?id=${encodeURIComponent(id)}`)
+async function fetchServers(animeId, rawEpisodeId) {
+  // rawEpisodeId from API looks like "one-piece-100?ep=84802"
+  // servers endpoint needs: ?id=one-piece-100?ep=84802
+  const numericEpId = extractNumericEpId(rawEpisodeId)
+  const combinedId = `${animeId}?ep=${numericEpId}`
+  const res = await fetch(`${BASE}/servers?id=${encodeURIComponent(combinedId)}`)
   if (!res.ok) throw new Error(`Failed to fetch servers: ${res.status}`)
   return res.json()
 }
 
-async function fetchSources(animeId, episodeId, server, lang) {
-  const id = `${animeId}?ep=${episodeId}`
-  const res = await fetch(`${BASE}/episode-srcs?id=${encodeURIComponent(id)}&server=${encodeURIComponent(server)}&category=${lang}`)
+async function fetchSources(animeId, rawEpisodeId, server, lang) {
+  // episode-srcs endpoint needs: ?id=one-piece-100?ep=84802&server=vidstreaming&category=sub
+  const numericEpId = extractNumericEpId(rawEpisodeId)
+  const combinedId = `${animeId}?ep=${numericEpId}`
+  const url = `${BASE}/episode-srcs?id=${encodeURIComponent(combinedId)}&server=${encodeURIComponent(server)}&category=${encodeURIComponent(lang)}`
+  const res = await fetch(url)
   if (!res.ok) throw new Error(`Failed to fetch sources: ${res.status}`)
   return res.json()
 }
 
+// Extract numeric ep ID from full episodeId string
+// "one-piece-100?ep=84802" → "84802"
+// "84802" → "84802"
+function extractNumericEpId(rawEpisodeId) {
+  if (!rawEpisodeId) return ''
+  const str = String(rawEpisodeId)
+  const match = str.match(/ep=(\d+)/)
+  if (match) return match[1]
+  if (/^\d+$/.test(str)) return str
+  return str
+}
+
 /* ── HLS Video Player ── */
-function HLSPlayer({ src, poster }) {
+function HLSPlayer({ src, poster, subtitles = [] }) {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
 
@@ -48,7 +66,9 @@ function HLSPlayer({ src, poster }) {
         hlsRef.current = hls
         hls.loadSource(src)
         hls.attachMedia(video)
-        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}))
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {})
+        })
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = src
         video.play().catch(() => {})
@@ -79,7 +99,10 @@ function HLSPlayer({ src, poster }) {
     }
 
     return () => {
-      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
+      if (hlsRef.current) {
+        hlsRef.current.destroy()
+        hlsRef.current = null
+      }
     }
   }, [src])
 
@@ -88,84 +111,100 @@ function HLSPlayer({ src, poster }) {
       ref={videoRef}
       poster={poster}
       controls
+      crossOrigin="anonymous"
       style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#000', display: 'block' }}
-    />
+    >
+      {subtitles.filter(s => s.lang && s.url).map((s, i) => (
+        <track key={i} kind="subtitles" src={s.url} label={s.lang} default={s.lang === 'English' && i === 0} />
+      ))}
+    </video>
   )
 }
 
 /* ── Player: server list + source loading ── */
-function Player({ animeId, episodeId, lang, poster }) {
+function Player({ animeId, rawEpisodeId, lang, poster }) {
   const [state, setState] = useState('loading')
   const [src, setSrc] = useState('')
+  const [subtitles, setSubtitles] = useState([])
   const [errorMsg, setErrorMsg] = useState('')
   const [subServers, setSubServers] = useState([])
   const [dubServers, setDubServers] = useState([])
   const [activeServer, setActiveServer] = useState('')
   const [loadingServer, setLoadingServer] = useState(false)
 
-  // Fetch servers then auto-load first one
   useEffect(() => {
-    if (!episodeId) return
+    if (!rawEpisodeId) return
     setState('loading')
     setSrc('')
+    setSubtitles([])
     setSubServers([])
     setDubServers([])
     setActiveServer('')
+    setErrorMsg('')
 
-    fetchServers(animeId, episodeId)
+    fetchServers(animeId, rawEpisodeId)
       .then(data => {
         const sub = Array.isArray(data?.sub) ? data.sub : []
         const dub = Array.isArray(data?.dub) ? data.dub : []
         setSubServers(sub)
         setDubServers(dub)
 
-        const preferred = (lang === 'dub' ? dub : sub)[0] || sub[0] || dub[0]
-        if (!preferred) throw new Error('No servers available for this episode')
+        if (!sub.length && !dub.length) throw new Error('No servers available for this episode')
 
+        const preferred = (lang === 'dub' ? dub : sub)[0] || sub[0] || dub[0]
+        if (!preferred) throw new Error('No servers available')
+
+        const preferredLang = (lang === 'dub' && dub.length > 0) ? 'dub' : 'sub'
         setActiveServer(preferred.serverName)
-        return doLoadSource(preferred.serverName, lang, sub, dub)
+        return doLoadSource(preferred.serverName, preferredLang, sub, dub)
       })
       .catch(err => {
+        console.error('fetchServers error:', err)
         setErrorMsg(err.message || 'Could not load servers.')
         setState('error')
       })
-  }, [animeId, episodeId, lang])
+  }, [animeId, rawEpisodeId, lang])
 
   function doLoadSource(serverName, category, sub, dub) {
     setLoadingServer(true)
-    // If dub selected but server only in sub list, fall back to sub
-    const dubNames = (dub || dubServers).map(s => s.serverName)
-    const subNames = (sub || subServers).map(s => s.serverName)
+    setState('loading')
+
+    const dubList = dub || dubServers
+    const subList = sub || subServers
+    const dubNames = dubList.map(s => s.serverName)
+    const subNames = subList.map(s => s.serverName)
     let resolvedLang = category
     if (category === 'dub' && !dubNames.includes(serverName) && subNames.includes(serverName)) {
       resolvedLang = 'sub'
     }
 
-    return fetchSources(animeId, episodeId, serverName, resolvedLang)
+    return fetchSources(animeId, rawEpisodeId, serverName, resolvedLang)
       .then(data => {
         const sources = Array.isArray(data?.sources) ? data.sources : []
+        if (!sources.length) throw new Error('No stream sources returned')
         const best = sources.find(s => s.isM3U8) || sources[0]
-        if (!best?.url) throw new Error('No stream found on this server')
+        if (!best?.url) throw new Error('No valid stream URL found')
         setSrc(best.url)
+        setSubtitles(Array.isArray(data?.subtitles) ? data.subtitles : [])
         setState('playing')
         setLoadingServer(false)
       })
       .catch(err => {
-        setErrorMsg('This server failed. Try another server.')
+        console.error('fetchSources error:', err)
+        setErrorMsg(err.message || 'This server failed. Try another server.')
         setState('error')
         setLoadingServer(false)
       })
   }
 
-  function switchServer(serverName) {
+  function switchServer(serverName, type) {
     if (serverName === activeServer && state === 'playing') return
     setActiveServer(serverName)
-    setState('loading')
     setSrc('')
-    doLoadSource(serverName, lang)
+    setSubtitles([])
+    doLoadSource(serverName, type === 'DUB' ? 'dub' : 'sub')
   }
 
-  // Build unified server list: sub servers first, then dub-only servers
   const allServers = [
     ...subServers.map(s => ({ name: s.serverName, type: 'SUB' })),
     ...dubServers
@@ -175,13 +214,12 @@ function Player({ animeId, episodeId, lang, poster }) {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Video area */}
       <div style={{ position: 'relative', flex: 1 }}>
         {state === 'loading' && <div className="pload"><Spin /></div>}
         {state === 'error' && (
           <div className="perror">
             <svg width="36" height="36" fill="none" stroke="var(--acc2)" strokeWidth="1.5" viewBox="0 0 24 24" style={{ marginBottom: '8px' }}>
-              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".6" fill="var(--acc2)"/>
+              <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><circle cx="12" cy="16" r=".6" fill="var(--acc2)" />
             </svg>
             <h4 style={{ marginBottom: '6px' }}>Could not load episode</h4>
             <p style={{ fontSize: '13px', color: 'var(--dim)', marginBottom: '12px' }}>{errorMsg}</p>
@@ -193,10 +231,9 @@ function Player({ animeId, episodeId, lang, poster }) {
             </button>
           </div>
         )}
-        {state === 'playing' && <HLSPlayer src={src} poster={poster} />}
+        {state === 'playing' && src && <HLSPlayer src={src} poster={poster} subtitles={subtitles} />}
       </div>
 
-      {/* Server selector */}
       {allServers.length > 0 && (
         <div className="server-bar">
           <span className="server-label">Server:</span>
@@ -205,7 +242,7 @@ function Player({ animeId, episodeId, lang, poster }) {
               <button
                 key={s.name}
                 className={'server-btn' + (activeServer === s.name ? ' on' : '')}
-                onClick={() => switchServer(s.name)}
+                onClick={() => switchServer(s.name, s.type)}
                 disabled={loadingServer}
                 title={`${s.name} (${s.type})`}
               >
@@ -228,7 +265,8 @@ export default function Watch() {
   const [theatre, setTheatre] = useState(false)
   const [autoNext, setAutoNext] = useState(false)
   const [episodes, setEpisodes] = useState([])
-  const [episodeId, setEpisodeId] = useState(null)
+  // Store full raw episodeId from API e.g. "one-piece-100?ep=84802"
+  const [rawEpisodeId, setRawEpisodeId] = useState(null)
   const [animeInfo, setAnimeInfo] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -236,11 +274,6 @@ export default function Watch() {
   const pwrapRef = useRef(null)
   const swipeX = useRef(null)
   const swipeY = useRef(null)
-
-  function extractEpId(rawEpId) {
-    const match = rawEpId.match(/ep=(\d+)/)
-    return match ? match[1] : rawEpId
-  }
 
   // Load episode list on mount
   useEffect(() => {
@@ -257,7 +290,9 @@ export default function Watch() {
 
         const epObj = eps.find(e => e.episodeNo === Number(ep))
         if (!epObj) throw new Error(`Episode ${ep} not found`)
-        setEpisodeId(extractEpId(epObj.episodeId))
+
+        // Keep full raw episodeId e.g. "one-piece-100?ep=84802"
+        setRawEpisodeId(epObj.episodeId)
 
         const title = route.name || id
         setAnimeInfo({ title, poster: '' })
@@ -267,18 +302,19 @@ export default function Watch() {
         pbDone()
       })
       .catch(err => {
+        console.error('Watch load error:', err)
         setError(err.message)
         setLoading(false)
         pbDone()
       })
   }, [id])
 
-  // Update episodeId when ep changes
+  // Update rawEpisodeId when ep changes
   useEffect(() => {
     if (!episodes.length) return
     const epObj = episodes.find(e => e.episodeNo === Number(ep))
     if (!epObj) return
-    setEpisodeId(extractEpId(epObj.episodeId))
+    setRawEpisodeId(epObj.episodeId)
     if (animeInfo) {
       saveCW(id, Number(ep), lang, animeInfo.title, animeInfo.title, '')
       document.title = `${animeInfo.title} - Episode ${ep} - anidexz`
@@ -327,6 +363,7 @@ export default function Watch() {
           e.preventDefault()
           setTheatre(v => !v)
           break
+        default: break
       }
     }
     document.addEventListener('keydown', onKey)
@@ -372,8 +409,8 @@ export default function Watch() {
               swipeX.current = null; swipeY.current = null
             }}
           >
-            {episodeId
-              ? <Player animeId={id} episodeId={episodeId} lang={lang} poster={poster} />
+            {rawEpisodeId
+              ? <Player animeId={id} rawEpisodeId={rawEpisodeId} lang={lang} poster={poster} />
               : <div className="pload"><Spin /></div>
             }
           </div>
@@ -390,7 +427,7 @@ export default function Watch() {
               )}
               <button className={'wctrl' + (theatre ? ' on' : '')} title="Theatre Mode (T)" onClick={() => setTheatre(v => !v)}>
                 <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
                 </svg> Theatre
               </button>
               <button
@@ -404,7 +441,7 @@ export default function Watch() {
                 }}
               >
                 <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <polygon points="5 3 19 12 5 21 5 3"/><line x1="19" x2="19" y1="3" y2="21"/>
+                  <polygon points="5 3 19 12 5 21 5 3" /><line x1="19" x2="19" y1="3" y2="21" />
                 </svg> Auto-Next
               </button>
               <div className="ltog" style={{ marginLeft: 'auto' }}>
