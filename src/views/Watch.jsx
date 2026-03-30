@@ -1,146 +1,327 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useApp } from '../AppContext.jsx'
 import { buildURL } from '../AppContext.jsx'
-import { alQuery, Q_DETAIL, loadEpisodes, resolveEpId, _c } from '../api.js'
-import { alTitle, alTitleAlt, alImg } from '../helpers.js'
 import { saveCW } from '../storage.js'
 import { Spin } from '../components/Shared.jsx'
 
-/* ── Player component ── */
-function Player({ name, titleAlt, ep, lang, onLoadStart }) {
-  const [state, setState] = useState('loading') // loading | playing | error
-  const [src, setSrc] = useState('')
-  const [errorMsg, setErrorMsg] = useState('')
+const BASE = 'https://anidexz-api.vercel.app/aniwatch'
+
+/* ── API helpers ── */
+async function fetchEpisodes(animeId) {
+  const res = await fetch(`${BASE}/episodes/${animeId}`)
+  if (!res.ok) throw new Error(`Failed to fetch episodes: ${res.status}`)
+  return res.json()
+}
+
+async function fetchServers(animeId, episodeId) {
+  const id = `${animeId}?ep=${episodeId}`
+  const res = await fetch(`${BASE}/servers?id=${encodeURIComponent(id)}`)
+  if (!res.ok) throw new Error(`Failed to fetch servers: ${res.status}`)
+  return res.json()
+}
+
+async function fetchSources(animeId, episodeId, server, lang) {
+  const id = `${animeId}?ep=${episodeId}`
+  const res = await fetch(`${BASE}/episode-srcs?id=${encodeURIComponent(id)}&server=${encodeURIComponent(server)}&category=${lang}`)
+  if (!res.ok) throw new Error(`Failed to fetch sources: ${res.status}`)
+  return res.json()
+}
+
+/* ── HLS Video Player ── */
+function HLSPlayer({ src, poster }) {
+  const videoRef = useRef(null)
+  const hlsRef = useRef(null)
 
   useEffect(() => {
-    setState('loading')
-    setSrc('')
-    resolveEpId(name, titleAlt, ep)
-      .then(epId => {
-        setSrc(`${_c}/${epId}/${lang}`)
-        setState('playing')
-      })
-      .catch(err => {
-        const isDub = lang === 'dub'
-        setErrorMsg(isDub
-          ? 'The dub for this episode may not be available yet. Try switching to SUB.'
-          : 'This episode could not be loaded. Please try again.')
-        setState('error')
-      })
-  }, [name, titleAlt, ep, lang])
+    if (!src || !videoRef.current) return
+    const video = videoRef.current
 
-  if (state === 'loading') return (
-    <div className="pload"><Spin /></div>
-  )
+    if (hlsRef.current) {
+      hlsRef.current.destroy()
+      hlsRef.current = null
+    }
 
-  if (state === 'error') return (
-    <div className="perror">
-      <svg width="36" height="36" fill="none" stroke="var(--acc2)" strokeWidth="1.5" viewBox="0 0 24 24" style={{ marginBottom: '4px' }}>
-        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".6" fill="var(--acc2)"/>
-      </svg>
-      <h4>Could not load episode</h4>
-      <p>{errorMsg}</p>
-      <button className="bp" onClick={() => setState('loading')} style={{ fontSize: '12px', padding: '8px 18px', marginTop: '4px' }}>Retry</button>
-    </div>
-  )
+    const initHls = () => {
+      const Hls = window.Hls
+      if (Hls && Hls.isSupported()) {
+        const hls = new Hls({ enableWorker: false })
+        hlsRef.current = hls
+        hls.loadSource(src)
+        hls.attachMedia(video)
+        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}))
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = src
+        video.play().catch(() => {})
+      } else {
+        video.src = src
+        video.play().catch(() => {})
+      }
+    }
+
+    if (src.includes('.m3u8')) {
+      if (window.Hls) {
+        initHls()
+      } else {
+        const existing = document.getElementById('hls-script')
+        if (existing) {
+          existing.addEventListener('load', initHls, { once: true })
+        } else {
+          const s = document.createElement('script')
+          s.id = 'hls-script'
+          s.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js'
+          s.onload = initHls
+          document.head.appendChild(s)
+        }
+      }
+    } else {
+      video.src = src
+      video.play().catch(() => {})
+    }
+
+    return () => {
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
+    }
+  }, [src])
 
   return (
-    <iframe
-      src={src}
-      allowFullScreen
-      allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-      title={`Episode ${ep}`}
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none', display: 'block' }}
+    <video
+      ref={videoRef}
+      poster={poster}
+      controls
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#000', display: 'block' }}
     />
   )
 }
 
+/* ── Player: server list + source loading ── */
+function Player({ animeId, episodeId, lang, poster }) {
+  const [state, setState] = useState('loading')
+  const [src, setSrc] = useState('')
+  const [errorMsg, setErrorMsg] = useState('')
+  const [subServers, setSubServers] = useState([])
+  const [dubServers, setDubServers] = useState([])
+  const [activeServer, setActiveServer] = useState('')
+  const [loadingServer, setLoadingServer] = useState(false)
+
+  // Fetch servers then auto-load first one
+  useEffect(() => {
+    if (!episodeId) return
+    setState('loading')
+    setSrc('')
+    setSubServers([])
+    setDubServers([])
+    setActiveServer('')
+
+    fetchServers(animeId, episodeId)
+      .then(data => {
+        const sub = Array.isArray(data?.sub) ? data.sub : []
+        const dub = Array.isArray(data?.dub) ? data.dub : []
+        setSubServers(sub)
+        setDubServers(dub)
+
+        const preferred = (lang === 'dub' ? dub : sub)[0] || sub[0] || dub[0]
+        if (!preferred) throw new Error('No servers available for this episode')
+
+        setActiveServer(preferred.serverName)
+        return doLoadSource(preferred.serverName, lang, sub, dub)
+      })
+      .catch(err => {
+        setErrorMsg(err.message || 'Could not load servers.')
+        setState('error')
+      })
+  }, [animeId, episodeId, lang])
+
+  function doLoadSource(serverName, category, sub, dub) {
+    setLoadingServer(true)
+    // If dub selected but server only in sub list, fall back to sub
+    const dubNames = (dub || dubServers).map(s => s.serverName)
+    const subNames = (sub || subServers).map(s => s.serverName)
+    let resolvedLang = category
+    if (category === 'dub' && !dubNames.includes(serverName) && subNames.includes(serverName)) {
+      resolvedLang = 'sub'
+    }
+
+    return fetchSources(animeId, episodeId, serverName, resolvedLang)
+      .then(data => {
+        const sources = Array.isArray(data?.sources) ? data.sources : []
+        const best = sources.find(s => s.isM3U8) || sources[0]
+        if (!best?.url) throw new Error('No stream found on this server')
+        setSrc(best.url)
+        setState('playing')
+        setLoadingServer(false)
+      })
+      .catch(err => {
+        setErrorMsg('This server failed. Try another server.')
+        setState('error')
+        setLoadingServer(false)
+      })
+  }
+
+  function switchServer(serverName) {
+    if (serverName === activeServer && state === 'playing') return
+    setActiveServer(serverName)
+    setState('loading')
+    setSrc('')
+    doLoadSource(serverName, lang)
+  }
+
+  // Build unified server list: sub servers first, then dub-only servers
+  const allServers = [
+    ...subServers.map(s => ({ name: s.serverName, type: 'SUB' })),
+    ...dubServers
+      .filter(d => !subServers.find(s => s.serverName === d.serverName))
+      .map(s => ({ name: s.serverName, type: 'DUB' })),
+  ]
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Video area */}
+      <div style={{ position: 'relative', flex: 1 }}>
+        {state === 'loading' && <div className="pload"><Spin /></div>}
+        {state === 'error' && (
+          <div className="perror">
+            <svg width="36" height="36" fill="none" stroke="var(--acc2)" strokeWidth="1.5" viewBox="0 0 24 24" style={{ marginBottom: '8px' }}>
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".6" fill="var(--acc2)"/>
+            </svg>
+            <h4 style={{ marginBottom: '6px' }}>Could not load episode</h4>
+            <p style={{ fontSize: '13px', color: 'var(--dim)', marginBottom: '12px' }}>{errorMsg}</p>
+            {allServers.length > 1 && (
+              <p style={{ fontSize: '12px', color: 'var(--dim)', marginBottom: '10px' }}>Try a different server below ↓</p>
+            )}
+            <button className="bp" onClick={() => doLoadSource(activeServer, lang)} style={{ fontSize: '12px', padding: '8px 18px' }}>
+              Retry
+            </button>
+          </div>
+        )}
+        {state === 'playing' && <HLSPlayer src={src} poster={poster} />}
+      </div>
+
+      {/* Server selector */}
+      {allServers.length > 0 && (
+        <div className="server-bar">
+          <span className="server-label">Server:</span>
+          <div className="server-btns">
+            {allServers.map(s => (
+              <button
+                key={s.name}
+                className={'server-btn' + (activeServer === s.name ? ' on' : '')}
+                onClick={() => switchServer(s.name)}
+                disabled={loadingServer}
+                title={`${s.name} (${s.type})`}
+              >
+                {s.name}
+                <span className="server-type-badge">{s.type}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Main Watch page ── */
 export default function Watch() {
   const { route, go, pbStart, pbDone, toast } = useApp()
   const { id, ep, lang: initLang } = route
   const [lang, setLang] = useState(initLang || 'sub')
   const [theatre, setTheatre] = useState(false)
   const [autoNext, setAutoNext] = useState(false)
-  const [meta, setMeta] = useState(null) // { title, titleAlt, poster, eps }
+  const [episodes, setEpisodes] = useState([])
+  const [episodeId, setEpisodeId] = useState(null)
+  const [animeInfo, setAnimeInfo] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const autoNextTimer = useRef(null)
   const pwrapRef = useRef(null)
   const swipeX = useRef(null)
   const swipeY = useRef(null)
 
+  function extractEpId(rawEpId) {
+    const match = rawEpId.match(/ep=(\d+)/)
+    return match ? match[1] : rawEpId
+  }
+
+  // Load episode list on mount
   useEffect(() => {
     if (!id || !ep) { go('home'); return }
     pbStart()
     setLoading(true)
-    alQuery(Q_DETAIL(), { id })
-      .then(d => {
-        const m = d?.Media
-        if (!m) throw new Error('Not found')
-        const title = alTitle(m)
-        const titleAlt = alTitleAlt(m)
-        const poster = alImg(m)
-        return loadEpisodes(title, titleAlt).then(eps => {
-          setMeta({ title, titleAlt, poster, eps })
-          saveCW(id, ep, lang, title, titleAlt, poster)
-          document.title = `${title} - Episode ${ep} - anidexz`
-          setLoading(false)
-          pbDone()
-        })
+    setError(null)
+
+    fetchEpisodes(id)
+      .then(data => {
+        const eps = data?.episodes || []
+        if (!eps.length) throw new Error('No episodes found')
+        setEpisodes(eps)
+
+        const epObj = eps.find(e => e.episodeNo === Number(ep))
+        if (!epObj) throw new Error(`Episode ${ep} not found`)
+        setEpisodeId(extractEpId(epObj.episodeId))
+
+        const title = route.name || id
+        setAnimeInfo({ title, poster: '' })
+        saveCW(id, Number(ep), lang, title, title, '')
+        document.title = `${title} - Episode ${ep} - anidexz`
+        setLoading(false)
+        pbDone()
       })
-      .catch(() => { setLoading(false); pbDone() })
+      .catch(err => {
+        setError(err.message)
+        setLoading(false)
+        pbDone()
+      })
   }, [id])
 
-  // Sync lang changes to URL without pushing a new history entry
+  // Update episodeId when ep changes
   useEffect(() => {
-    if (!meta) return
-    const next = { view: 'watch', id, name: meta.title, titleAlt: meta.titleAlt, ep, lang }
+    if (!episodes.length) return
+    const epObj = episodes.find(e => e.episodeNo === Number(ep))
+    if (!epObj) return
+    setEpisodeId(extractEpId(epObj.episodeId))
+    if (animeInfo) {
+      saveCW(id, Number(ep), lang, animeInfo.title, animeInfo.title, '')
+      document.title = `${animeInfo.title} - Episode ${ep} - anidexz`
+    }
+  }, [ep, episodes])
+
+  // Sync URL
+  useEffect(() => {
+    if (!animeInfo) return
+    const next = { view: 'watch', id, name: animeInfo.title, titleAlt: animeInfo.title, ep, lang }
     try { history.replaceState(next, '', buildURL(next)) } catch {}
   }, [lang, ep])
 
-  // Save continue watching when ep/lang changes
-  useEffect(() => {
-    if (meta) {
-      saveCW(id, ep, lang, meta.title, meta.titleAlt, meta.poster)
-      document.title = `${meta.title} - Episode ${ep} - anidexz`
-    }
-  }, [ep, lang, meta])
-
-  // Auto-next timer
-  function startAutoNext(maxEp) {
+  // Auto-next
+  const startAutoNext = useCallback((maxEp) => {
     clearInterval(autoNextTimer.current)
-    if (!autoNext || ep >= maxEp) return
+    if (!autoNext || Number(ep) >= maxEp) return
     let count = 5
     autoNextTimer.current = setInterval(() => {
       count--
       toast(`Next episode in ${count}s`)
       if (count <= 0) {
         clearInterval(autoNextTimer.current)
-        go('watch', { id, name: meta.title, titleAlt: meta.titleAlt, ep: ep + 1, lang })
+        go('watch', { id, name: animeInfo?.title, titleAlt: animeInfo?.title, ep: Number(ep) + 1, lang })
       }
     }, 1000)
-  }
+  }, [autoNext, ep, id, lang, animeInfo, go, toast])
 
   // Keyboard shortcuts
   useEffect(() => {
     function onKey(e) {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return
-      if (!meta) return
-      const maxEp = meta.eps.length
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      if (!episodes.length) return
+      const maxEp = episodes[episodes.length - 1].episodeNo
+      const epNum = Number(ep)
       switch (e.key) {
         case 'ArrowLeft':
           e.preventDefault()
-          if (ep > 1) go('watch', { id, name: meta.title, titleAlt: meta.titleAlt, ep: ep - 1, lang })
+          if (epNum > 1) go('watch', { id, name: animeInfo?.title, titleAlt: animeInfo?.title, ep: epNum - 1, lang })
           break
         case 'ArrowRight':
           e.preventDefault()
-          if (ep < maxEp) go('watch', { id, name: meta.title, titleAlt: meta.titleAlt, ep: ep + 1, lang })
-          break
-        case 'f': case 'F':
-          e.preventDefault()
-          if (pwrapRef.current) {
-            if (document.fullscreenElement) document.exitFullscreen()
-            else pwrapRef.current.requestFullscreen?.()
-          }
+          if (epNum < maxEp) go('watch', { id, name: animeInfo?.title, titleAlt: animeInfo?.title, ep: epNum + 1, lang })
           break
         case 't': case 'T':
           e.preventDefault()
@@ -150,14 +331,23 @@ export default function Watch() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [meta, ep, lang, id])
+  }, [episodes, ep, lang, id, animeInfo])
 
-  if (loading || !meta) return <Spin />
+  if (loading) return <Spin />
 
-  const { title, titleAlt, poster, eps } = meta
-  const maxEp = eps.length
+  if (error) return (
+    <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--dim)' }}>
+      <p style={{ color: 'var(--fg)', fontSize: '20px', marginBottom: '10px' }}>Failed to load</p>
+      <p style={{ fontSize: '13px', marginBottom: '20px' }}>{error}</p>
+      <button className="bp" onClick={() => go('home')}>Go Home</button>
+    </div>
+  )
+
+  const { title, poster } = animeInfo
+  const maxEp = episodes[episodes.length - 1]?.episodeNo || episodes.length
+  const epNum = Number(ep)
   const stitle = title.length > 22 ? title.slice(0, 22) + '...' : title
-  const CHUNK = 100
+  const epNums = episodes.map(e => e.episodeNo)
 
   return (
     <>
@@ -168,33 +358,37 @@ export default function Watch() {
             className="pwrap"
             id="pwrap"
             ref={pwrapRef}
-            onTouchStart={e => { if (e.touches.length === 1) { swipeX.current = e.touches[0].clientX; swipeY.current = e.touches[0].clientY } }}
+            onTouchStart={e => {
+              if (e.touches.length === 1) { swipeX.current = e.touches[0].clientX; swipeY.current = e.touches[0].clientY }
+            }}
             onTouchEnd={e => {
               if (swipeX.current === null) return
               const dx = e.changedTouches[0].clientX - swipeX.current
               const dy = e.changedTouches[0].clientY - swipeY.current
               if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
-                if (dx < 0 && ep < maxEp) { go('watch', { id, name: title, titleAlt, ep: ep + 1, lang }); toast('Next ep') }
-                else if (dx > 0 && ep > 1) { go('watch', { id, name: title, titleAlt, ep: ep - 1, lang }); toast('Prev ep') }
+                if (dx < 0 && epNum < maxEp) { go('watch', { id, name: title, titleAlt: title, ep: epNum + 1, lang }); toast('Next ep') }
+                else if (dx > 0 && epNum > 1) { go('watch', { id, name: title, titleAlt: title, ep: epNum - 1, lang }); toast('Prev ep') }
               }
               swipeX.current = null; swipeY.current = null
             }}
           >
-            <Player name={title} titleAlt={titleAlt} ep={ep} lang={lang} />
+            {episodeId
+              ? <Player animeId={id} episodeId={episodeId} lang={lang} poster={poster} />
+              : <div className="pload"><Spin /></div>
+            }
           </div>
 
           <div className="winfo">
             <div className="wt">{title}</div>
             <div className="wet">Episode {ep}</div>
             <div className="wnav">
-              {ep > 1 && <button className="bs" onClick={() => go('watch', { id, name: title, titleAlt, ep: ep - 1, lang })}>◀ Prev</button>}
-              {maxEp > 0 && ep < maxEp && <button className="bp" onClick={() => go('watch', { id, name: title, titleAlt, ep: ep + 1, lang })}>Next ▶</button>}
-              <button
-                className={'wctrl' + (theatre ? ' on' : '')}
-                id="theatre-btn"
-                title={theatre ? 'Exit Theatre (T)' : 'Theatre Mode (T)'}
-                onClick={() => setTheatre(v => !v)}
-              >
+              {epNum > 1 && (
+                <button className="bs" onClick={() => go('watch', { id, name: title, titleAlt: title, ep: epNum - 1, lang })}>◀ Prev</button>
+              )}
+              {epNum < maxEp && (
+                <button className="bp" onClick={() => go('watch', { id, name: title, titleAlt: title, ep: epNum + 1, lang })}>Next ▶</button>
+              )}
+              <button className={'wctrl' + (theatre ? ' on' : '')} title="Theatre Mode (T)" onClick={() => setTheatre(v => !v)}>
                 <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
                 </svg> Theatre
@@ -219,27 +413,26 @@ export default function Watch() {
               </div>
             </div>
             <div className="kb-hint">
-              <span><kbd className="kb-key">Left</kbd> Prev ep</span>
-              <span><kbd className="kb-key">Right</kbd> Next ep</span>
-              <span><kbd className="kb-key">F</kbd> Fullscreen</span>
+              <span><kbd className="kb-key">←</kbd> Prev ep</span>
+              <span><kbd className="kb-key">→</kbd> Next ep</span>
               <span><kbd className="kb-key">T</kbd> Theatre</span>
             </div>
           </div>
         </div>
 
-        {/* Sidebar episode list */}
+        {/* Sidebar */}
         <div className="sbar">
           <div className="sbar-title">
-            <img src={poster} style={{ width: '26px', height: '26px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }} loading="lazy" alt="" />
+            {poster && <img src={poster} style={{ width: '26px', height: '26px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }} loading="lazy" alt="" />}
             {stitle}
           </div>
           <div className="eplist" id="eplist">
-            {eps.map(n => (
+            {epNums.map(n => (
               <div
                 key={n}
-                className={'epli' + (n === ep ? ' on' : '')}
-                onClick={() => go('watch', { id, name: title, titleAlt, ep: n, lang })}
-                ref={n === ep ? el => el?.scrollIntoView({ block: 'center' }) : null}
+                className={'epli' + (n === epNum ? ' on' : '')}
+                onClick={() => go('watch', { id, name: title, titleAlt: title, ep: n, lang })}
+                ref={n === epNum ? el => el?.scrollIntoView({ block: 'center' }) : null}
               >
                 <div className="epnum">{n}</div>
                 <span className="epitxt">Episode {n}</span>
@@ -253,11 +446,11 @@ export default function Watch() {
       <div className="mob-ep-wrap">
         <div className="mob-ep-title">Episodes</div>
         <div className="epgrid">
-          {eps.map(n => (
+          {epNums.map(n => (
             <button
               key={n}
-              className={'epbtn' + (n === ep ? ' on' : '')}
-              onClick={() => go('watch', { id, name: title, titleAlt, ep: n, lang })}
+              className={'epbtn' + (n === epNum ? ' on' : '')}
+              onClick={() => go('watch', { id, name: title, titleAlt: title, ep: n, lang })}
             >{n}</button>
           ))}
         </div>
