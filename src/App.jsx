@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { AppProvider, useApp, fromURL } from './AppContext.jsx'
 import Header from './components/Header.jsx'
 import { ToastContainer, ProgressBar, Loader } from './components/UI.jsx'
@@ -14,7 +14,6 @@ import Detail from './views/Detail.jsx'
 import Watch from './views/Watch.jsx'
 import Domains from './views/Domains.jsx'
 
-// 👇 NEW IMPORTS
 import Upcoming from './views/Upcoming.jsx'
 import Completed from './views/Completed.jsx'
 import Season from './views/Season.jsx'
@@ -54,6 +53,40 @@ function setupPWA() {
 }
 setupPWA()
 
+/* ── Error Boundary ── */
+class ErrorBoundary extends React.Component {
+  state = { error: null }
+
+  static getDerivedStateFromError(e) {
+    return { error: e.message }
+  }
+
+  componentDidCatch(e, info) {
+    console.error('💥 App crash:', e.message, info.componentStack)
+  }
+
+  render() {
+    if (this.state.error) return (
+      <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--dim)' }}>
+        <p style={{ color: 'var(--fg)', fontSize: '20px', marginBottom: '10px' }}>Something went wrong</p>
+        <p style={{ fontSize: '13px', marginBottom: '20px', maxWidth: '400px', margin: '0 auto 20px' }}>
+          {this.state.error}
+        </p>
+        <button
+          className="bp"
+          onClick={() => {
+            this.setState({ error: null })
+            window.history.back()
+          }}
+        >
+          Go Back
+        </button>
+      </div>
+    )
+    return this.props.children
+  }
+}
+
 /* ── Main router view ── */
 function AppInner() {
   const { route, go, toast, pbStart, pbDone } = useApp()
@@ -74,7 +107,6 @@ function AppInner() {
       search:    'Search - anidexz',
       community: 'Community - anidexz',
       domains:   'Domains - anidexz',
-      // 👇 NEW TITLES
       upcoming:  'Most Anticipated - anidexz',
       completed: 'Completed Series - anidexz',
       season:    'This Season - anidexz',
@@ -135,7 +167,6 @@ function AppInner() {
       case 'watch':     return <Watch />
       case 'search':    return <Search />
       case 'domains':   return <Domains />
-      // 👇 NEW PAGES
       case 'upcoming':  return <Upcoming />
       case 'completed': return <Completed />
       case 'season':    return <Season />
@@ -153,7 +184,9 @@ function AppInner() {
       {!isLanding && <Header onRandom={goRandom} />}
 
       <div id="app" className={isLanding ? 'no-header' : ''}>
-        {renderView()}
+        <ErrorBoundary key={view + (route.id || '')}>
+          {renderView()}
+        </ErrorBoundary>
       </div>
 
       {!isLanding && (
