@@ -84,6 +84,7 @@ export default function Home() {
 
   const {
     spotLightAnimes   = [],
+    latestEpisodes    = [],
     trendingAnimes    = [],
     top10Animes       = {},
     featuredAnimes    = {},
@@ -100,6 +101,17 @@ export default function Home() {
     <div>
       {/* HERO */}
       {spotLightAnimes.length > 0 && <Hero list={spotLightAnimes.slice(0, 8)} />}
+
+      {/* LATEST RELEASED EPISODES — grid */}
+      {latestEpisodes?.length > 0 && (
+        <Section title="Latest Released Episodes" viewAll="updated">
+          <div className="grid">
+            {latestEpisodes.slice(0, 18).map((item, i) => (
+              <Card key={item.id + '-g-' + i} m={aw(item)} delay={i * 34} />
+            ))}
+          </div>
+        </Section>
+      )}
 
       {/* TRENDING NOW */}
       {trendingAnimes.length > 0 && (
