@@ -4,14 +4,16 @@ import { buildURL } from '../AppContext.jsx'
 import { saveCW } from '../storage.js'
 import { Spin } from '../components/Shared.jsx'
 
-const BASE = 'https://anidexz-api.vercel.app/aniwatch'
+const BASE       = 'https://anidexz-api.vercel.app/aniwatch'
 const HINDI_BASE = 'https://anime-world-india-api-jade.vercel.app'
 
-// ── Module-level cache — survives episode navigation, resets on full page reload ──
-// Map<animeId, { status: 'available'|'unavailable', episodes: Array }>
+// ── Module-level cache ──
+// Map<animeId, { status, episodes, hindiId }>
 const hindiCache = new Map()
 
-/* ── API ── */
+/* ─────────────────────────────────────────────
+   API helpers
+───────────────────────────────────────────── */
 async function fetchEpisodes(animeId) {
   const res = await fetch(`${BASE}/episodes/${animeId}`)
   if (!res.ok) throw new Error(`Failed to fetch episodes: ${res.status}`)
@@ -19,41 +21,109 @@ async function fetchEpisodes(animeId) {
 }
 
 /**
- * ONE request to /api/info/{id} — gives us availability + all episode IDs.
- * Caches in `hindiCache` so switching episodes never re-fetches.
+ * Try multiple ID strategies to find the anime on AnimeWorldIndia.
+ *
+ * AniWatch IDs look like "one-piece-100" or "solo-leveling-18562".
+ * AWI uses plain slugs like "one-piece" or "solo-leveling".
+ *
+ * Strategy order:
+ *   1. Raw aniwatch ID (unlikely but free to try)
+ *   2. Strip trailing numeric suffix  "one-piece-100" → "one-piece"
+ *   3. Search by anime title, grab first result's ID
  */
-async function loadHindiData(animeId) {
+async function loadHindiData(animeId, animeName) {
   if (hindiCache.has(animeId)) return hindiCache.get(animeId)
 
-  try {
-    const res = await fetch(`${HINDI_BASE}/api/info/${animeId}`)
-    if (!res.ok) {
-      const result = { status: 'unavailable', episodes: [] }
-      hindiCache.set(animeId, result)
-      return result
+  const stripped  = animeId.replace(/-\d+$/, '')        // "one-piece-100" → "one-piece"
+  const candidates = [...new Set([animeId, stripped])]  // dedupe if no numeric suffix
+
+  // Strategies 1 & 2 — direct slug attempts
+  for (const candidate of candidates) {
+    const result = await tryFetchHindiInfo(animeId, candidate)
+    if (result) return result
+  }
+
+  // Strategy 3 — search by title and use the returned ID
+  if (animeName) {
+    const searchId = await searchHindiId(animeName)
+    if (searchId) {
+      const result = await tryFetchHindiInfo(animeId, searchId)
+      if (result) return result
     }
+  }
+
+  // All strategies failed
+  const fail = { status: 'unavailable', episodes: [], hindiId: null }
+  hindiCache.set(animeId, fail)
+  return fail
+}
+
+async function tryFetchHindiInfo(cacheKey, hindiId) {
+  try {
+    const res = await fetch(`${HINDI_BASE}/api/info/${hindiId}`)
+    if (!res.ok) return null
     const data = await res.json()
 
-    // Normalise — API may nest episodes differently
+    // API may return episodes in several shapes
     const eps =
-      data?.episodes ||
+      data?.episodesList ||
+      data?.episodes     ||
       data?.data?.episodes ||
       data?.season?.episodes ||
       []
 
     const hasContent = Array.isArray(eps) ? eps.length > 0 : !!data?.title
+    if (!hasContent) return null
 
     const result = {
-      status: hasContent ? 'available' : 'unavailable',
+      status: 'available',
       episodes: Array.isArray(eps) ? eps : [],
+      hindiId,
     }
-    hindiCache.set(animeId, result)
+    hindiCache.set(cacheKey, result)
     return result
   } catch {
-    const result = { status: 'unavailable', episodes: [] }
-    hindiCache.set(animeId, result)
-    return result
+    return null
   }
+}
+
+async function searchHindiId(animeName) {
+  try {
+    const res = await fetch(
+      `${HINDI_BASE}/api/search?q=${encodeURIComponent(animeName)}`
+    )
+    if (!res.ok) return null
+    const data  = await res.json()
+    const items = data?.data?.items || data?.items || []
+    return items[0]?.id || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Build the episode ID for /api/embed/.
+ * AWI embed IDs look like "spy-x-family-3x1" (hindiSlug-SeasonxEpisode).
+ * We check the episodesList from /api/info first, then fall back to "slug-1xN".
+ */
+function resolveHindiEpisodeId(hindiId, hindiEpisodes, epNum) {
+  if (!hindiId) return null
+
+  if (Array.isArray(hindiEpisodes) && hindiEpisodes.length) {
+    const match = hindiEpisodes.find(e =>
+      e.episodeNo === epNum ||
+      e.episode   === epNum ||
+      e.number    === epNum ||
+      e.ep        === epNum ||
+      Number(e.episodeNo) === epNum ||
+      Number(e.episode)   === epNum
+    )
+    if (match?.id)        return match.id
+    if (match?.episodeId) return match.episodeId
+  }
+
+  // Fallback: assume season 1
+  return `${hindiId}-1x${epNum}`
 }
 
 async function fetchHindiEmbed(episodeId) {
@@ -71,7 +141,8 @@ function pickEmbedUrl(data) {
   const servers = data?.servers || data?.links || data?.sources || []
   if (Array.isArray(servers) && servers.length) {
     const play = servers.find(s =>
-      s.name?.toLowerCase().includes('play') || s.server?.toLowerCase().includes('play')
+      s.name?.toLowerCase().includes('play') ||
+      s.server?.toLowerCase().includes('play')
     )
     return play?.url || play?.link || servers[0]?.url || servers[0]?.link || null
   }
@@ -80,9 +151,9 @@ function pickEmbedUrl(data) {
 
 function extractNumericEpId(rawEpisodeId) {
   if (!rawEpisodeId) return ''
-  const str = String(rawEpisodeId)
+  const str   = String(rawEpisodeId)
   const match = str.match(/ep=(\d+)/)
-  if (match) return match[1]
+  if (match)             return match[1]
   if (/^\d+$/.test(str)) return str
   return str
 }
@@ -91,16 +162,18 @@ function megaplayUrl(numericEpId, lang) {
   return `https://megaplay.buzz/stream/s-2/${numericEpId}/${lang}`
 }
 
-/* ── Hindi Check Popup ── */
+/* ─────────────────────────────────────────────
+   Hindi Check Popup
+───────────────────────────────────────────── */
 function HindiPopup({ status, countdown, onDismiss }) {
   if (!status) return null
 
-  const overlayStyle = {
-    position: 'fixed', inset: 0, zIndex: 999,
-    background: 'rgba(0,0,0,0.6)',
+  const overlay = {
+    position: 'fixed', inset: 0, zIndex: 9999,
+    background: 'rgba(0,0,0,0.65)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   }
-  const modalStyle = {
+  const modal = {
     background: 'var(--bg, #1a1a1a)',
     border: '1px solid var(--brd, #333)',
     borderRadius: '14px',
@@ -111,51 +184,39 @@ function HindiPopup({ status, countdown, onDismiss }) {
     textAlign: 'center',
   }
 
-  const circumference = 2 * Math.PI * 26 // ~163.4
+  const circumference = 2 * Math.PI * 26  // ~163.4
   const offset = circumference * (1 - Math.max(0, countdown) / 15)
 
   return (
-    <div
-      style={overlayStyle}
-      onClick={e => { if (e.target === e.currentTarget) onDismiss() }}
-    >
-      <div style={modalStyle}>
+    <div style={overlay} onClick={e => e.target === e.currentTarget && onDismiss()}>
+      <div style={modal}>
 
+        {/* ── CHECKING ── */}
         {status === 'checking' && <>
-          {/* Countdown ring */}
           <div style={{ position: 'relative', width: 64, height: 64 }}>
-            <svg
-              width="64" height="64" viewBox="0 0 64 64"
-              style={{ transform: 'rotate(-90deg)', display: 'block' }}
-            >
-              <circle
-                cx="32" cy="32" r="26"
-                fill="none" stroke="var(--dim, #444)" strokeWidth="5"
-              />
-              <circle
-                cx="32" cy="32" r="26"
-                fill="none" stroke="#ff6b00" strokeWidth="5"
+            <svg width="64" height="64" viewBox="0 0 64 64"
+              style={{ transform: 'rotate(-90deg)', display: 'block' }}>
+              <circle cx="32" cy="32" r="26" fill="none"
+                stroke="var(--dim, #444)" strokeWidth="5" />
+              <circle cx="32" cy="32" r="26" fill="none"
+                stroke="#ff6b00" strokeWidth="5"
                 strokeDasharray={circumference}
                 strokeDashoffset={offset}
                 strokeLinecap="round"
-                style={{ transition: 'stroke-dashoffset 1s linear' }}
-              />
+                style={{ transition: 'stroke-dashoffset 1s linear' }} />
             </svg>
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '20px', fontWeight: 600,
-              color: 'var(--fg, #fff)',
+              fontSize: '20px', fontWeight: 600, color: 'var(--fg, #fff)',
             }}>
               {Math.max(0, countdown)}
             </div>
           </div>
 
-          {/* Spinner */}
           <div style={{
             width: 28, height: 28, borderRadius: '50%',
-            border: '3px solid var(--dim, #444)',
-            borderTopColor: '#ff6b00',
+            border: '3px solid var(--dim, #444)', borderTopColor: '#ff6b00',
             animation: 'hspinner 0.8s linear infinite',
           }} />
 
@@ -163,10 +224,12 @@ function HindiPopup({ status, countdown, onDismiss }) {
             Checking Hindi availability
           </div>
           <div style={{ fontSize: '13px', color: 'var(--dim, #aaa)', lineHeight: 1.5 }}>
-            Verifying if <strong style={{ color: 'var(--fg, #fff)' }}>हिंदी Dub</strong> is available for this anime…
+            Searching for <strong style={{ color: 'var(--fg, #fff)' }}>हिंदी Dub</strong> across
+            multiple sources…
           </div>
         </>}
 
+        {/* ── AVAILABLE ── */}
         {status === 'available' && <>
           <div style={{
             width: 52, height: 52, borderRadius: '50%',
@@ -177,27 +240,24 @@ function HindiPopup({ status, countdown, onDismiss }) {
               <path d="M20 6L9 17l-5-5" />
             </svg>
           </div>
-
           <span style={{
             fontSize: '10px', background: '#ff6b00', color: '#fff',
             borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '0.04em',
           }}>HI</span>
-
           <div style={{ fontSize: '15px', fontWeight: 600, color: '#2a9d2a' }}>
             Hindi Dub available!
           </div>
           <div style={{ fontSize: '13px', color: 'var(--dim, #aaa)' }}>
             Loading Hindi stream for this episode…
           </div>
-
           <div style={{
             width: 24, height: 24, borderRadius: '50%',
-            border: '3px solid var(--dim, #444)',
-            borderTopColor: '#ff6b00',
+            border: '3px solid var(--dim, #444)', borderTopColor: '#ff6b00',
             animation: 'hspinner 0.8s linear infinite',
           }} />
         </>}
 
+        {/* ── UNAVAILABLE ── */}
         {status === 'unavailable' && <>
           <div style={{
             width: 52, height: 52, borderRadius: '50%',
@@ -210,31 +270,26 @@ function HindiPopup({ status, countdown, onDismiss }) {
               <line x1="9" y1="9" x2="15" y2="15" />
             </svg>
           </div>
-
           <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--fg, #fff)' }}>
             Hindi Dub not available
           </div>
           <div style={{ fontSize: '13px', color: 'var(--dim, #aaa)', lineHeight: 1.5 }}>
-            This anime doesn't have a Hindi dub in our database. Switching back to Sub.
+            Couldn't find a Hindi dub for this anime. Switching back to Sub.
           </div>
-
           <button className="bp" onClick={onDismiss} style={{ marginTop: '4px' }}>
             Dismiss
           </button>
         </>}
 
       </div>
-
-      <style>{`
-        @keyframes hspinner {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
+      <style>{`@keyframes hspinner { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
 
-/* ── Iframe Player ── */
+/* ─────────────────────────────────────────────
+   Iframe Player
+───────────────────────────────────────────── */
 function IframePlayer({ numericEpId, lang, hindiSrc }) {
   const src = lang === 'hindi' && hindiSrc
     ? hindiSrc
@@ -246,10 +301,8 @@ function IframePlayer({ numericEpId, lang, hindiSrc }) {
     <iframe
       key={src}
       src={src}
-      width="100%"
-      height="100%"
-      frameBorder="0"
-      scrolling="no"
+      width="100%" height="100%"
+      frameBorder="0" scrolling="no"
       allowFullScreen
       allow="autoplay; fullscreen; picture-in-picture"
       style={{
@@ -261,7 +314,9 @@ function IframePlayer({ numericEpId, lang, hindiSrc }) {
   )
 }
 
-/* ── Hindi Status Badge ── */
+/* ─────────────────────────────────────────────
+   Hindi Status Badge
+───────────────────────────────────────────── */
 function HindiBadge({ status }) {
   if (status === 'checking') return (
     <span style={{ fontSize: '10px', color: 'var(--dim)', marginLeft: '4px' }}>…</span>
@@ -283,39 +338,39 @@ function HindiBadge({ status }) {
   return null
 }
 
-/* ── Main Watch page ── */
+/* ─────────────────────────────────────────────
+   Main Watch Page
+───────────────────────────────────────────── */
 export default function Watch() {
   const { route, go, pbStart, pbDone, toast } = useApp()
   const { id, ep, lang: initLang } = route
-  const [lang, setLang] = useState(initLang || 'sub')
-  const [theatre, setTheatre] = useState(false)
-  const [autoNext, setAutoNext] = useState(false)
-  const [episodes, setEpisodes] = useState([])
-  const [numericEpId, setNumericEpId] = useState(null)
-  const [animeInfo, setAnimeInfo] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
 
-  // Hindi — hydrate from cache immediately if we already checked this anime
-  const [hindiStatus, setHindiStatus] = useState(() =>
-    hindiCache.has(id) ? hindiCache.get(id).status : 'idle'
-  )
-  const [hindiEpisodes, setHindiEpisodes] = useState(() =>
-    hindiCache.has(id) ? hindiCache.get(id).episodes : []
-  )
-  const [hindiSrc, setHindiSrc] = useState(null)
-  const [hindiLoading, setHindiLoading] = useState(false)
+  const [lang,          setLang]         = useState(initLang || 'sub')
+  const [theatre,       setTheatre]      = useState(false)
+  const [autoNext,      setAutoNext]     = useState(false)
+  const [episodes,      setEpisodes]     = useState([])
+  const [numericEpId,   setNumericEpId]  = useState(null)
+  const [animeInfo,     setAnimeInfo]    = useState(null)
+  const [loading,       setLoading]      = useState(true)
+  const [error,         setError]        = useState(null)
 
-  // Hindi popup state
-  const [hindiPopup, setHindiPopup] = useState(null) // null | 'checking' | 'available' | 'unavailable'
-  const [hindiCountdown, setHindiCountdown] = useState(15)
+  // Hindi state — hydrate from cache immediately if available
+  const [hindiStatus,   setHindiStatus]   = useState(() => hindiCache.has(id) ? hindiCache.get(id).status   : 'idle')
+  const [hindiEpisodes, setHindiEpisodes] = useState(() => hindiCache.has(id) ? hindiCache.get(id).episodes : [])
+  const [hindiId,       setHindiId]       = useState(() => hindiCache.has(id) ? hindiCache.get(id).hindiId  : null)
+  const [hindiSrc,      setHindiSrc]      = useState(null)
+  const [hindiLoading,  setHindiLoading]  = useState(false)
 
-  const autoNextTimer = useRef(null)
-  const hindiCheckTimer = useRef(null)
+  // Popup state
+  const [hindiPopup,      setHindiPopup]      = useState(null)   // null | 'checking' | 'available' | 'unavailable'
+  const [hindiCountdown,  setHindiCountdown]  = useState(15)
+
+  const autoNextTimer       = useRef(null)
+  const hindiCheckTimer     = useRef(null)
   const hindiCountdownTimer = useRef(null)
   const pwrapRef = useRef(null)
-  const swipeX = useRef(null)
-  const swipeY = useRef(null)
+  const swipeX   = useRef(null)
+  const swipeY   = useRef(null)
 
   // ── Main episode load ──
   useEffect(() => {
@@ -350,45 +405,37 @@ export default function Watch() {
       })
   }, [id])
 
-  // ── Hindi background check: 15s delay, then ONE request, cached forever ──
-  // This runs silently in background. The popup is triggered on button click.
+  // ── Silent background Hindi check after 15s ──
   useEffect(() => {
     if (!id) return
 
-    // Already cached — apply immediately, no timer needed
     if (hindiCache.has(id)) {
-      const cached = hindiCache.get(id)
-      setHindiStatus(cached.status)
-      setHindiEpisodes(cached.episodes)
+      const c = hindiCache.get(id)
+      setHindiStatus(c.status)
+      setHindiEpisodes(c.episodes)
+      setHindiId(c.hindiId)
       return
     }
 
-    // Silent background check after 15s
     setHindiStatus('idle')
     hindiCheckTimer.current = setTimeout(() => {
-      // Only auto-check if user hasn't already triggered it via button
-      if (!hindiCache.has(id)) {
-        loadHindiData(id).then(result => {
-          setHindiStatus(result.status)
-          setHindiEpisodes(result.episodes)
-          // If popup is open in 'checking' state, update it
-          setHindiPopup(prev => {
-            if (prev === 'checking') {
-              if (result.status === 'available') {
-                setLang('hindi')
-                return 'available'
-              }
-              // Auto-dismiss unavailable after 2.5s
-              setTimeout(() => {
-                setHindiPopup(null)
-                setLang('sub')
-              }, 2500)
-              return 'unavailable'
-            }
-            return prev
-          })
+      if (hindiCache.has(id)) return  // already resolved via button click
+      const name = animeInfo?.title || route.name || ''
+      loadHindiData(id, name).then(result => {
+        setHindiStatus(result.status)
+        setHindiEpisodes(result.episodes)
+        setHindiId(result.hindiId)
+        // If popup is still open in checking state, resolve it
+        setHindiPopup(prev => {
+          if (prev !== 'checking') return prev
+          if (result.status === 'available') {
+            setLang('hindi')
+            return 'available'
+          }
+          setTimeout(() => { setHindiPopup(null); setLang('sub') }, 2500)
+          return 'unavailable'
         })
-      }
+      })
     }, 15000)
 
     return () => {
@@ -397,7 +444,7 @@ export default function Watch() {
     }
   }, [id])
 
-  // ── Load Hindi embed when switching to Hindi lang ──
+  // ── Load Hindi embed when lang switches to hindi ──
   useEffect(() => {
     if (lang !== 'hindi') { setHindiSrc(null); return }
     if (hindiStatus !== 'available') return
@@ -405,16 +452,16 @@ export default function Watch() {
     setHindiLoading(true)
     setHindiSrc(null)
 
-    const epNum = Number(ep)
-    const hindiEp = hindiEpisodes.find(e =>
-      e.episodeNo === epNum ||
-      e.episode  === epNum ||
-      e.number   === epNum ||
-      e.ep       === epNum ||
-      Number(e.episodeNo) === epNum
-    )
+    const epNum     = Number(ep)
+    const episodeId = resolveHindiEpisodeId(hindiId, hindiEpisodes, epNum)
 
-    const episodeId = hindiEp?.episodeId || hindiEp?.id || `${id}-episode-${epNum}`
+    if (!episodeId) {
+      toast('Could not resolve Hindi episode ID')
+      setLang('sub')
+      setHindiLoading(false)
+      setHindiPopup(null)
+      return
+    }
 
     fetchHindiEmbed(episodeId)
       .then(data => {
@@ -435,12 +482,11 @@ export default function Watch() {
             if (src) {
               setHindiSrc(src)
               toast('Hindi Dub loaded ✓')
-              setHindiPopup(null)
             } else {
               toast('Hindi not available for this episode')
               setLang('sub')
-              setHindiPopup(null)
             }
+            setHindiPopup(null)
           })
           .catch(() => {
             toast('Hindi not available for this episode')
@@ -455,9 +501,9 @@ export default function Watch() {
         setHindiLoading(false)
         setHindiPopup(null)
       })
-  }, [lang, ep, hindiEpisodes, hindiStatus])
+  }, [lang, ep, hindiEpisodes, hindiStatus, hindiId])
 
-  // Update numericEpId when ep changes
+  // ── Update numericEpId when ep changes ──
   useEffect(() => {
     if (!episodes.length) return
     const epObj = episodes.find(e => e.episodeNo === Number(ep))
@@ -469,14 +515,14 @@ export default function Watch() {
     }
   }, [ep, episodes])
 
-  // Sync URL
+  // ── Sync URL ──
   useEffect(() => {
     if (!animeInfo) return
     const next = { view: 'watch', id, name: animeInfo.title, titleAlt: animeInfo.title, ep, lang }
     try { history.replaceState(next, '', buildURL(next)) } catch {}
   }, [lang, ep])
 
-  // Auto-next
+  // ── Auto-next ──
   const startAutoNext = useCallback((maxEp) => {
     clearInterval(autoNextTimer.current)
     if (!autoNext || Number(ep) >= maxEp) return
@@ -491,7 +537,7 @@ export default function Watch() {
     }, 1000)
   }, [autoNext, ep, id, lang, animeInfo, go, toast])
 
-  // Keyboard shortcuts
+  // ── Keyboard shortcuts ──
   useEffect(() => {
     function onKey(e) {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
@@ -518,6 +564,7 @@ export default function Watch() {
     return () => document.removeEventListener('keydown', onKey)
   }, [episodes, ep, lang, id, animeInfo])
 
+  // ── Loading / error ──
   if (loading) return <Spin />
 
   if (error) return (
@@ -529,39 +576,33 @@ export default function Watch() {
   )
 
   const { title } = animeInfo
-  const maxEp = episodes[episodes.length - 1]?.episodeNo || episodes.length
-  const epNum = Number(ep)
+  const maxEp  = episodes[episodes.length - 1]?.episodeNo || episodes.length
+  const epNum  = Number(ep)
   const stitle = title.length > 22 ? title.slice(0, 22) + '...' : title
   const epNums = episodes.map(e => e.episodeNo)
 
-  // ── Hindi button click handler ──
+  // ── Hindi button handler ──
   function handleLangChange(newLang) {
-    if (newLang !== 'hindi') {
-      setLang(newLang)
-      return
-    }
+    if (newLang !== 'hindi') { setLang(newLang); return }
 
-    // Already confirmed available — show loading popup then switch
     if (hindiStatus === 'available') {
       setHindiPopup('available')
       setLang('hindi')
       return
     }
 
-    // Already confirmed unavailable — show popup briefly
     if (hindiStatus === 'unavailable') {
       setHindiPopup('unavailable')
       setTimeout(() => setHindiPopup(null), 3000)
       return
     }
 
-    // idle or still checking — show popup and fire check immediately
+    // idle or checking — show popup, fire check immediately
     setHindiPopup('checking')
     setHindiCountdown(15)
     clearTimeout(hindiCheckTimer.current)
     clearInterval(hindiCountdownTimer.current)
 
-    // Countdown tick
     let c = 15
     hindiCountdownTimer.current = setInterval(() => {
       c--
@@ -570,21 +611,19 @@ export default function Watch() {
     }, 1000)
 
     setHindiStatus('checking')
-    loadHindiData(id).then(result => {
+    const name = animeInfo?.title || route.name || ''
+    loadHindiData(id, name).then(result => {
       clearInterval(hindiCountdownTimer.current)
       setHindiStatus(result.status)
       setHindiEpisodes(result.episodes)
+      setHindiId(result.hindiId)
 
       if (result.status === 'available') {
         setHindiPopup('available')
         setLang('hindi')
       } else {
         setHindiPopup('unavailable')
-        // Auto-dismiss after 3s and fall back to sub
-        setTimeout(() => {
-          setHindiPopup(null)
-          setLang('sub')
-        }, 3000)
+        setTimeout(() => { setHindiPopup(null); setLang('sub') }, 3000)
       }
     })
   }
@@ -592,18 +631,13 @@ export default function Watch() {
   function dismissHindiPopup() {
     setHindiPopup(null)
     clearInterval(hindiCountdownTimer.current)
-    if (hindiStatus === 'unavailable' || hindiPopup === 'unavailable') {
-      setLang('sub')
-    }
-    // If dismissed mid-check, revert lang
-    if (hindiPopup === 'checking') {
+    if (hindiPopup === 'checking' || hindiStatus === 'unavailable' || hindiPopup === 'unavailable') {
       setLang('sub')
     }
   }
 
   return (
     <>
-      {/* Hindi Popup */}
       <HindiPopup
         status={hindiPopup}
         countdown={hindiCountdown}
@@ -650,16 +684,16 @@ export default function Watch() {
             <div className="wet">Episode {ep}</div>
             <div className="wnav">
               {epNum > 1 && (
-                <button
-                  className="bs"
-                  onClick={() => go('watch', { id, name: title, titleAlt: title, ep: epNum - 1, lang })}
-                >◀ Prev</button>
+                <button className="bs"
+                  onClick={() => go('watch', { id, name: title, titleAlt: title, ep: epNum - 1, lang })}>
+                  ◀ Prev
+                </button>
               )}
               {epNum < maxEp && (
-                <button
-                  className="bp"
-                  onClick={() => go('watch', { id, name: title, titleAlt: title, ep: epNum + 1, lang })}
-                >Next ▶</button>
+                <button className="bp"
+                  onClick={() => go('watch', { id, name: title, titleAlt: title, ep: epNum + 1, lang })}>
+                  Next ▶
+                </button>
               )}
               <button
                 className={'wctrl' + (theatre ? ' on' : '')}
@@ -685,7 +719,7 @@ export default function Watch() {
                 </svg> Auto-Next
               </button>
 
-              {/* Language Toggle — SUB / DUB / हिंदी */}
+              {/* Language Toggle */}
               <div className="ltog" style={{ marginLeft: 'auto' }}>
                 <button
                   className={'lbtn' + (lang === 'sub' ? ' on' : '')}
@@ -706,7 +740,7 @@ export default function Watch() {
                   }
                   style={{
                     position: 'relative',
-                    opacity: hindiStatus === 'unavailable' ? 0.4 : 1,
+                    opacity: hindiStatus === 'unavailable' ? 0.45 : 1,
                     cursor: 'pointer',
                   }}
                 >
@@ -715,6 +749,7 @@ export default function Watch() {
                 </button>
               </div>
             </div>
+
             <div className="kb-hint">
               <span><kbd className="kb-key">←</kbd> Prev ep</span>
               <span><kbd className="kb-key">→</kbd> Next ep</span>
