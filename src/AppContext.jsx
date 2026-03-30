@@ -25,7 +25,6 @@ export function buildURL(s) {
     case 'browse':    return '/browse'
     case 'community': return '/community'
     case 'domains':   return '/domains'
-    // 👇 ADD THESE
     case 'upcoming':  return '/upcoming'
     case 'completed': return '/completed'
     case 'season':    return '/season'
@@ -55,12 +54,12 @@ export function fromURL() {
   const { pathname, search } = location
   const params = new URLSearchParams(search)
 
-  // /anime/:id/:slug?
-  const animeMatch = pathname.match(/^\/anime\/(\d+)(?:\/([^/]+))?$/)
+  // /anime/:id/:slug?  (id can be string like "one-piece-100")
+  const animeMatch = pathname.match(/^\/anime\/([^/]+)(?:\/([^/]+))?$/)
   if (animeMatch) {
     return {
       view: 'anime',
-      id: Number(animeMatch[1]),
+      id: animeMatch[1],
       name: animeMatch[2] ? animeMatch[2].replace(/-/g, ' ') : null,
       titleAlt: null,
       ep: null,
@@ -69,12 +68,12 @@ export function fromURL() {
     }
   }
 
-  // /watch/:id/:slug?/ep/:ep
-  const watchMatch = pathname.match(/^\/watch\/(\d+)(?:\/([^/]+))?\/ep\/(\d+)$/)
+  // /watch/:id/:slug?/ep/:ep  (id can be string like "one-piece-100")
+  const watchMatch = pathname.match(/^\/watch\/([^/]+)(?:\/([^/]+))?\/ep\/(\d+)$/)
   if (watchMatch) {
     return {
       view: 'watch',
-      id: Number(watchMatch[1]),
+      id: watchMatch[1],
       name: watchMatch[2] ? watchMatch[2].replace(/-/g, ' ') : null,
       titleAlt: null,
       ep: Number(watchMatch[3]),
