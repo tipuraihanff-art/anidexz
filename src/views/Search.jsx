@@ -56,25 +56,30 @@ export default function Search() {
     pbStart()
 
     try {
-      // Build URL with query parameters
-      let url = `${API_BASE}/search?keyword=${encodeURIComponent(query)}&page=${currentPage}`
+      // Build URL with query parameters - URL encode the search query properly
+      const encodedQuery = encodeURIComponent(query)
+      let url = `${API_BASE}/search?keyword=${encodedQuery}&page=${currentPage}`
       
-      // Add filters if they exist (your API might support these)
-      // Note: Adjust filter parameters based on what your API actually supports
-      const filterParams = []
-      if (filter.genre) filterParams.push(`genre=${encodeURIComponent(filter.genre)}`)
-      if (filter.type) filterParams.push(`type=${filter.type}`)
-      if (filter.status) filterParams.push(`status=${filter.status}`)
-      if (filter.year) filterParams.push(`year=${filter.year}`)
+      console.log('Searching URL:', url) // Debug log
       
-      if (filterParams.length) {
-        url += `&${filterParams.join('&')}`
+      // Add CORS mode and credentials if needed
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        // Add mode: 'cors' if needed, but it's default
+      })
+      
+      console.log('Response status:', response.status) // Debug log
+      
+      if (!response.ok) {
+        throw new Error(`Search failed: ${response.status} ${response.statusText}`)
       }
-
-      const res = await fetch(url)
-      if (!res.ok) throw new Error(`Search failed: ${res.status}`)
       
-      const data = await res.json()
+      const data = await response.json()
+      console.log('Search results:', data) // Debug log
       
       // Transform API response to match Card component expectations
       const transformedAnimes = (data.animes || []).map(anime => ({
@@ -90,7 +95,7 @@ export default function Search() {
         },
         format: anime.duration ? 'TV' : 'Unknown',
         episodes: anime.episodes?.eps || 0,
-        status: 'FINISHED', // You might want to extract this from your API
+        status: 'FINISHED',
         averageScore: anime.rated ? 75 : 0,
         description: anime.duration || ''
       }))
@@ -112,7 +117,7 @@ export default function Search() {
       
     } catch (err) {
       console.error('Search error:', err)
-      setError(err.message)
+      setError(err.message || 'Failed to fetch search results. Please check your connection and try again.')
     } finally {
       if (resetPage) {
         setLoading(false)
@@ -151,6 +156,22 @@ export default function Search() {
     }
   }, [filter]) // Re-run when filters change
 
+  // Test API connection on mount (optional)
+  useEffect(() => {
+    const testAPI = async () => {
+      try {
+        const testResponse = await fetch(`${API_BASE}/`, {
+          method: 'HEAD',
+          mode: 'cors'
+        })
+        console.log('API connection test:', testResponse.ok ? 'OK' : 'Failed')
+      } catch (err) {
+        console.warn('API connection test failed:', err.message)
+      }
+    }
+    testAPI()
+  }, [])
+
   return (
     <>
       <div className="srh-hdr">
@@ -186,12 +207,14 @@ export default function Search() {
                 background: 'var(--accent, #ff6b00)',
                 border: 'none',
                 borderRadius: '0 8px 8px 0',
-                padding: '0 16px',
+                padding: '0 20px',
                 marginLeft: 'auto',
-                cursor: 'pointer',
+                cursor: loading ? 'not-allowed' : 'pointer',
                 color: 'white',
                 fontWeight: 'bold',
-                height: '100%'
+                height: '100%',
+                transition: 'opacity 0.2s',
+                opacity: loading ? 0.6 : 1
               }}
             >
               {loading ? '...' : 'Search'}
@@ -225,13 +248,34 @@ export default function Search() {
           <div className="grid"><Skels /></div>
         ) : error ? (
           <div className="grid">
-            <Empty title="Search Failed" body={error} />
+            <Empty 
+              title="Search Failed" 
+              body={
+                <div>
+                  <p>{error}</p>
+                  <button 
+                    onClick={handleSearch}
+                    style={{
+                      marginTop: '16px',
+                      padding: '8px 16px',
+                      background: 'var(--accent, #ff6b00)',
+                      border: 'none',
+                      borderRadius: '6px',
+                      color: 'white',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Try Again
+                  </button>
+                </div>
+              } 
+            />
           </div>
         ) : !items.length ? (
           <div className="grid">
             <Empty 
               title="No Results Found" 
-              body={`Couldn't find any anime matching "${searchQuery.trim()}". Try a different name.`} 
+              body={`Couldn't find any anime matching "${searchQuery.trim()}". Try a different name or check your spelling.`} 
             />
           </div>
         ) : (
@@ -242,14 +286,34 @@ export default function Search() {
                   key={m.id} 
                   m={m} 
                   delay={i < 24 ? i * 34 : 0}
-                  onClick={() => go('watch', { id: m.id, name: m.title.romaji, titleAlt: m.title.romaji, ep: 1, lang: 'sub' })}
+                  onClick={() => go('watch', { 
+                    id: m.id, 
+                    name: m.title.romaji, 
+                    titleAlt: m.title.romaji, 
+                    ep: 1, 
+                    lang: 'sub' 
+                  })}
                 />
               ))}
             </div>
-            {hasMore && !loading && <Sentinel onVisible={loadMore} />}
-            {loadingMore && (
-              <div style={{ textAlign: 'center', padding: '20px' }}>
-                <div className="spinner" />
+            {hasMore && !loading && (
+              <>
+                <Sentinel onVisible={loadMore} />
+                {loadingMore && (
+                  <div style={{ textAlign: 'center', padding: '20px' }}>
+                    <div className="spinner" />
+                  </div>
+                )}
+              </>
+            )}
+            {!hasMore && items.length > 0 && (
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '20px', 
+                color: 'var(--dim)',
+                fontSize: '13px'
+              }}>
+                End of results
               </div>
             )}
           </>
@@ -257,15 +321,12 @@ export default function Search() {
       </div>
       
       <style jsx>{`
-        .srh-search-btn {
-          transition: opacity 0.2s;
-        }
-        .srh-search-btn:hover {
+        .srh-search-btn:hover:not(:disabled) {
           opacity: 0.9;
+          transform: translateY(-1px);
         }
-        .srh-search-btn:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
+        .srh-search-btn:active:not(:disabled) {
+          transform: translateY(0);
         }
       `}</style>
     </>
