@@ -242,7 +242,6 @@ export async function loadEpisodes(title, titleAlt) {
       if (!r.ok) continue
       const d = await r.json()
       if (!d.totalEpisodes || d.totalEpisodes < 1) continue
-      // Returns [1, 2, 3, ... totalEpisodes] — only aired episodes
       return Array.from({ length: d.totalEpisodes }, (_, i) => i + 1)
     } catch {
       continue
@@ -273,3 +272,15 @@ export async function resolveEpId(name, alt, ep) {
 }
 
 export { _c }
+
+/* ── AniWatch Search (slug resolver) ── */
+const AW_BASE = 'https://anidexz-api.vercel.app/aniwatch'
+
+export async function resolveAniWatchId(title) {
+  const res = await fetch(`${AW_BASE}/search?keyword=${encodeURIComponent(title)}`)
+  if (!res.ok) throw new Error('Search failed')
+  const data = await res.json()
+  const first = data?.animes?.[0]
+  if (!first?.id) throw new Error('Not found on AniWatch')
+  return first.id
+}
