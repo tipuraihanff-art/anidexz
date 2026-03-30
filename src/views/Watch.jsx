@@ -91,6 +91,149 @@ function megaplayUrl(numericEpId, lang) {
   return `https://megaplay.buzz/stream/s-2/${numericEpId}/${lang}`
 }
 
+/* ── Hindi Check Popup ── */
+function HindiPopup({ status, countdown, onDismiss }) {
+  if (!status) return null
+
+  const overlayStyle = {
+    position: 'fixed', inset: 0, zIndex: 999,
+    background: 'rgba(0,0,0,0.6)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  }
+  const modalStyle = {
+    background: 'var(--bg, #1a1a1a)',
+    border: '1px solid var(--brd, #333)',
+    borderRadius: '14px',
+    padding: '2rem 2.5rem',
+    display: 'flex', flexDirection: 'column',
+    alignItems: 'center', gap: '14px',
+    minWidth: '270px', maxWidth: '320px',
+    textAlign: 'center',
+  }
+
+  const circumference = 2 * Math.PI * 26 // ~163.4
+  const offset = circumference * (1 - Math.max(0, countdown) / 15)
+
+  return (
+    <div
+      style={overlayStyle}
+      onClick={e => { if (e.target === e.currentTarget) onDismiss() }}
+    >
+      <div style={modalStyle}>
+
+        {status === 'checking' && <>
+          {/* Countdown ring */}
+          <div style={{ position: 'relative', width: 64, height: 64 }}>
+            <svg
+              width="64" height="64" viewBox="0 0 64 64"
+              style={{ transform: 'rotate(-90deg)', display: 'block' }}
+            >
+              <circle
+                cx="32" cy="32" r="26"
+                fill="none" stroke="var(--dim, #444)" strokeWidth="5"
+              />
+              <circle
+                cx="32" cy="32" r="26"
+                fill="none" stroke="#ff6b00" strokeWidth="5"
+                strokeDasharray={circumference}
+                strokeDashoffset={offset}
+                strokeLinecap="round"
+                style={{ transition: 'stroke-dashoffset 1s linear' }}
+              />
+            </svg>
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '20px', fontWeight: 600,
+              color: 'var(--fg, #fff)',
+            }}>
+              {Math.max(0, countdown)}
+            </div>
+          </div>
+
+          {/* Spinner */}
+          <div style={{
+            width: 28, height: 28, borderRadius: '50%',
+            border: '3px solid var(--dim, #444)',
+            borderTopColor: '#ff6b00',
+            animation: 'hspinner 0.8s linear infinite',
+          }} />
+
+          <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--fg, #fff)' }}>
+            Checking Hindi availability
+          </div>
+          <div style={{ fontSize: '13px', color: 'var(--dim, #aaa)', lineHeight: 1.5 }}>
+            Verifying if <strong style={{ color: 'var(--fg, #fff)' }}>हिंदी Dub</strong> is available for this anime…
+          </div>
+        </>}
+
+        {status === 'available' && <>
+          <div style={{
+            width: 52, height: 52, borderRadius: '50%',
+            background: 'rgba(42,157,42,0.15)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="26" height="26" fill="none" stroke="#2a9d2a" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          </div>
+
+          <span style={{
+            fontSize: '10px', background: '#ff6b00', color: '#fff',
+            borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '0.04em',
+          }}>HI</span>
+
+          <div style={{ fontSize: '15px', fontWeight: 600, color: '#2a9d2a' }}>
+            Hindi Dub available!
+          </div>
+          <div style={{ fontSize: '13px', color: 'var(--dim, #aaa)' }}>
+            Loading Hindi stream for this episode…
+          </div>
+
+          <div style={{
+            width: 24, height: 24, borderRadius: '50%',
+            border: '3px solid var(--dim, #444)',
+            borderTopColor: '#ff6b00',
+            animation: 'hspinner 0.8s linear infinite',
+          }} />
+        </>}
+
+        {status === 'unavailable' && <>
+          <div style={{
+            width: 52, height: 52, borderRadius: '50%',
+            background: 'rgba(150,150,150,0.12)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="26" height="26" fill="none" stroke="var(--dim, #888)" strokeWidth="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="15" y1="9" x2="9" y2="15" />
+              <line x1="9" y1="9" x2="15" y2="15" />
+            </svg>
+          </div>
+
+          <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--fg, #fff)' }}>
+            Hindi Dub not available
+          </div>
+          <div style={{ fontSize: '13px', color: 'var(--dim, #aaa)', lineHeight: 1.5 }}>
+            This anime doesn't have a Hindi dub in our database. Switching back to Sub.
+          </div>
+
+          <button className="bp" onClick={onDismiss} style={{ marginTop: '4px' }}>
+            Dismiss
+          </button>
+        </>}
+
+      </div>
+
+      <style>{`
+        @keyframes hspinner {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 /* ── Iframe Player ── */
 function IframePlayer({ numericEpId, lang, hindiSrc }) {
   const src = lang === 'hindi' && hindiSrc
@@ -109,7 +252,11 @@ function IframePlayer({ numericEpId, lang, hindiSrc }) {
       scrolling="no"
       allowFullScreen
       allow="autoplay; fullscreen; picture-in-picture"
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none', background: '#000' }}
+      style={{
+        position: 'absolute', inset: 0,
+        width: '100%', height: '100%',
+        border: 'none', background: '#000',
+      }}
     />
   )
 }
@@ -159,8 +306,13 @@ export default function Watch() {
   const [hindiSrc, setHindiSrc] = useState(null)
   const [hindiLoading, setHindiLoading] = useState(false)
 
+  // Hindi popup state
+  const [hindiPopup, setHindiPopup] = useState(null) // null | 'checking' | 'available' | 'unavailable'
+  const [hindiCountdown, setHindiCountdown] = useState(15)
+
   const autoNextTimer = useRef(null)
   const hindiCheckTimer = useRef(null)
+  const hindiCountdownTimer = useRef(null)
   const pwrapRef = useRef(null)
   const swipeX = useRef(null)
   const swipeY = useRef(null)
@@ -198,11 +350,12 @@ export default function Watch() {
       })
   }, [id])
 
-  // ── Hindi check: 15s delay, then ONE request, cached forever ──
+  // ── Hindi background check: 15s delay, then ONE request, cached forever ──
+  // This runs silently in background. The popup is triggered on button click.
   useEffect(() => {
     if (!id) return
 
-    // Already cached — skip timer, apply immediately
+    // Already cached — apply immediately, no timer needed
     if (hindiCache.has(id)) {
       const cached = hindiCache.get(id)
       setHindiStatus(cached.status)
@@ -210,17 +363,38 @@ export default function Watch() {
       return
     }
 
-    // Wait 15 seconds before hitting the Hindi API
+    // Silent background check after 15s
     setHindiStatus('idle')
     hindiCheckTimer.current = setTimeout(() => {
-      setHindiStatus('checking')
-      loadHindiData(id).then(result => {
-        setHindiStatus(result.status)
-        setHindiEpisodes(result.episodes)
-      })
+      // Only auto-check if user hasn't already triggered it via button
+      if (!hindiCache.has(id)) {
+        loadHindiData(id).then(result => {
+          setHindiStatus(result.status)
+          setHindiEpisodes(result.episodes)
+          // If popup is open in 'checking' state, update it
+          setHindiPopup(prev => {
+            if (prev === 'checking') {
+              if (result.status === 'available') {
+                setLang('hindi')
+                return 'available'
+              }
+              // Auto-dismiss unavailable after 2.5s
+              setTimeout(() => {
+                setHindiPopup(null)
+                setLang('sub')
+              }, 2500)
+              return 'unavailable'
+            }
+            return prev
+          })
+        })
+      }
     }, 15000)
 
-    return () => clearTimeout(hindiCheckTimer.current)
+    return () => {
+      clearTimeout(hindiCheckTimer.current)
+      clearInterval(hindiCountdownTimer.current)
+    }
   }, [id])
 
   // ── Load Hindi embed when switching to Hindi lang ──
@@ -249,6 +423,7 @@ export default function Watch() {
           setHindiSrc(url)
           toast('Hindi Dub loaded ✓')
           setHindiLoading(false)
+          setHindiPopup(null)
           return
         }
         // Last resort: generic scraper
@@ -257,16 +432,28 @@ export default function Watch() {
           .then(r => r.json())
           .then(scraped => {
             const src = scraped?.embedUrl || scraped?.url || scraped?.iframe
-            if (src) { setHindiSrc(src); toast('Hindi Dub loaded ✓') }
-            else { toast('Hindi not available for this episode'); setLang('sub') }
+            if (src) {
+              setHindiSrc(src)
+              toast('Hindi Dub loaded ✓')
+              setHindiPopup(null)
+            } else {
+              toast('Hindi not available for this episode')
+              setLang('sub')
+              setHindiPopup(null)
+            }
           })
-          .catch(() => { toast('Hindi not available for this episode'); setLang('sub') })
+          .catch(() => {
+            toast('Hindi not available for this episode')
+            setLang('sub')
+            setHindiPopup(null)
+          })
           .finally(() => setHindiLoading(false))
       })
       .catch(() => {
         toast('Failed to load Hindi dub')
         setLang('sub')
         setHindiLoading(false)
+        setHindiPopup(null)
       })
   }, [lang, ep, hindiEpisodes, hindiStatus])
 
@@ -347,20 +534,82 @@ export default function Watch() {
   const stitle = title.length > 22 ? title.slice(0, 22) + '...' : title
   const epNums = episodes.map(e => e.episodeNo)
 
+  // ── Hindi button click handler ──
   function handleLangChange(newLang) {
-    if (newLang === 'hindi' && hindiStatus === 'unavailable') {
-      toast('Hindi Dub not available for this anime')
+    if (newLang !== 'hindi') {
+      setLang(newLang)
       return
     }
-    if (newLang === 'hindi' && (hindiStatus === 'idle' || hindiStatus === 'checking')) {
-      toast('Still checking Hindi availability…')
+
+    // Already confirmed available — show loading popup then switch
+    if (hindiStatus === 'available') {
+      setHindiPopup('available')
+      setLang('hindi')
       return
     }
-    setLang(newLang)
+
+    // Already confirmed unavailable — show popup briefly
+    if (hindiStatus === 'unavailable') {
+      setHindiPopup('unavailable')
+      setTimeout(() => setHindiPopup(null), 3000)
+      return
+    }
+
+    // idle or still checking — show popup and fire check immediately
+    setHindiPopup('checking')
+    setHindiCountdown(15)
+    clearTimeout(hindiCheckTimer.current)
+    clearInterval(hindiCountdownTimer.current)
+
+    // Countdown tick
+    let c = 15
+    hindiCountdownTimer.current = setInterval(() => {
+      c--
+      setHindiCountdown(c)
+      if (c <= 0) clearInterval(hindiCountdownTimer.current)
+    }, 1000)
+
+    setHindiStatus('checking')
+    loadHindiData(id).then(result => {
+      clearInterval(hindiCountdownTimer.current)
+      setHindiStatus(result.status)
+      setHindiEpisodes(result.episodes)
+
+      if (result.status === 'available') {
+        setHindiPopup('available')
+        setLang('hindi')
+      } else {
+        setHindiPopup('unavailable')
+        // Auto-dismiss after 3s and fall back to sub
+        setTimeout(() => {
+          setHindiPopup(null)
+          setLang('sub')
+        }, 3000)
+      }
+    })
+  }
+
+  function dismissHindiPopup() {
+    setHindiPopup(null)
+    clearInterval(hindiCountdownTimer.current)
+    if (hindiStatus === 'unavailable' || hindiPopup === 'unavailable') {
+      setLang('sub')
+    }
+    // If dismissed mid-check, revert lang
+    if (hindiPopup === 'checking') {
+      setLang('sub')
+    }
   }
 
   return (
     <>
+      {/* Hindi Popup */}
+      <HindiPopup
+        status={hindiPopup}
+        countdown={hindiCountdown}
+        onDismiss={dismissHindiPopup}
+      />
+
       <div className={'wlayout' + (theatre ? ' theatre' : '')} id="wlayout">
         <div style={{ minWidth: 0, overflow: 'hidden' }}>
           <div
@@ -368,17 +617,26 @@ export default function Watch() {
             id="pwrap"
             ref={pwrapRef}
             onTouchStart={e => {
-              if (e.touches.length === 1) { swipeX.current = e.touches[0].clientX; swipeY.current = e.touches[0].clientY }
+              if (e.touches.length === 1) {
+                swipeX.current = e.touches[0].clientX
+                swipeY.current = e.touches[0].clientY
+              }
             }}
             onTouchEnd={e => {
               if (swipeX.current === null) return
               const dx = e.changedTouches[0].clientX - swipeX.current
               const dy = e.changedTouches[0].clientY - swipeY.current
               if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
-                if (dx < 0 && epNum < maxEp) { go('watch', { id, name: title, titleAlt: title, ep: epNum + 1, lang }); toast('Next ep') }
-                else if (dx > 0 && epNum > 1) { go('watch', { id, name: title, titleAlt: title, ep: epNum - 1, lang }); toast('Prev ep') }
+                if (dx < 0 && epNum < maxEp) {
+                  go('watch', { id, name: title, titleAlt: title, ep: epNum + 1, lang })
+                  toast('Next ep')
+                } else if (dx > 0 && epNum > 1) {
+                  go('watch', { id, name: title, titleAlt: title, ep: epNum - 1, lang })
+                  toast('Prev ep')
+                }
               }
-              swipeX.current = null; swipeY.current = null
+              swipeX.current = null
+              swipeY.current = null
             }}
           >
             {hindiLoading
@@ -392,12 +650,22 @@ export default function Watch() {
             <div className="wet">Episode {ep}</div>
             <div className="wnav">
               {epNum > 1 && (
-                <button className="bs" onClick={() => go('watch', { id, name: title, titleAlt: title, ep: epNum - 1, lang })}>◀ Prev</button>
+                <button
+                  className="bs"
+                  onClick={() => go('watch', { id, name: title, titleAlt: title, ep: epNum - 1, lang })}
+                >◀ Prev</button>
               )}
               {epNum < maxEp && (
-                <button className="bp" onClick={() => go('watch', { id, name: title, titleAlt: title, ep: epNum + 1, lang })}>Next ▶</button>
+                <button
+                  className="bp"
+                  onClick={() => go('watch', { id, name: title, titleAlt: title, ep: epNum + 1, lang })}
+                >Next ▶</button>
               )}
-              <button className={'wctrl' + (theatre ? ' on' : '')} title="Theatre Mode (T)" onClick={() => setTheatre(v => !v)}>
+              <button
+                className={'wctrl' + (theatre ? ' on' : '')}
+                title="Theatre Mode (T)"
+                onClick={() => setTheatre(v => !v)}
+              >
                 <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
                 </svg> Theatre
@@ -434,12 +702,12 @@ export default function Watch() {
                     hindiStatus === 'available'   ? 'Hindi Dub available' :
                     hindiStatus === 'checking'    ? 'Checking Hindi availability…' :
                     hindiStatus === 'unavailable' ? 'Hindi Dub not available' :
-                    'Hindi check starts 15s after page load'
+                    'Click to check Hindi availability'
                   }
                   style={{
                     position: 'relative',
                     opacity: hindiStatus === 'unavailable' ? 0.4 : 1,
-                    cursor: hindiStatus === 'unavailable' ? 'not-allowed' : 'pointer',
+                    cursor: 'pointer',
                   }}
                 >
                   हिंदी
