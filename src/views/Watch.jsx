@@ -6,36 +6,15 @@ import { Spin } from '../components/Shared.jsx'
 
 const BASE = 'https://anidexz-api.vercel.app/aniwatch'
 
-/* ── Proxy: rewrites m3u8 URL through allorigins so CORS + Referer are bypassed ── */
-function proxied(url) {
-  if (!url) return url
-  return `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
-}
-
-/* ── API helpers ── */
+/* ── API ── */
 async function fetchEpisodes(animeId) {
   const res = await fetch(`${BASE}/episodes/${animeId}`)
   if (!res.ok) throw new Error(`Failed to fetch episodes: ${res.status}`)
   return res.json()
 }
 
-async function fetchServers(animeId, rawEpisodeId) {
-  const numericEpId = extractNumericEpId(rawEpisodeId)
-  const combinedId = `${animeId}?ep=${numericEpId}`
-  const res = await fetch(`${BASE}/servers?id=${encodeURIComponent(combinedId)}`)
-  if (!res.ok) throw new Error(`Failed to fetch servers: ${res.status}`)
-  return res.json()
-}
-
-async function fetchSources(animeId, rawEpisodeId, server, lang) {
-  const numericEpId = extractNumericEpId(rawEpisodeId)
-  const combinedId = `${animeId}?ep=${numericEpId}`
-  const url = `${BASE}/episode-srcs?id=${encodeURIComponent(combinedId)}&server=${encodeURIComponent(server)}&category=${encodeURIComponent(lang)}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Failed to fetch sources: ${res.status}`)
-  return res.json()
-}
-
+// Extract just the numeric ep ID from episodeId string
+// "one-piece-100?ep=84802" → "84802"
 function extractNumericEpId(rawEpisodeId) {
   if (!rawEpisodeId) return ''
   const str = String(rawEpisodeId)
@@ -45,233 +24,30 @@ function extractNumericEpId(rawEpisodeId) {
   return str
 }
 
-/* ── HLS Video Player ── */
-function HLSPlayer({ src, poster, subtitles = [] }) {
-  const videoRef = useRef(null)
-  const hlsRef = useRef(null)
-
-  useEffect(() => {
-    if (!src || !videoRef.current) return
-    const video = videoRef.current
-
-    if (hlsRef.current) {
-      hlsRef.current.destroy()
-      hlsRef.current = null
-    }
-
-    // We try proxied URL first, then fall back to raw URL
-    const loadWithHls = (streamUrl, onFatalError) => {
-      const Hls = window.Hls
-      if (Hls && Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: false })
-        hlsRef.current = hls
-        hls.loadSource(streamUrl)
-        hls.attachMedia(video)
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          video.play().catch(() => {})
-        })
-        hls.on(Hls.Events.ERROR, (event, data) => {
-          if (data.fatal) {
-            hls.destroy()
-            hlsRef.current = null
-            if (onFatalError) onFatalError()
-          }
-        })
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = streamUrl
-        video.play().catch(() => {})
-      } else {
-        video.src = streamUrl
-        video.play().catch(() => {})
-      }
-    }
-
-    const init = () => {
-      if (src.includes('.m3u8')) {
-        // Try proxied first, fall back to raw
-        loadWithHls(proxied(src), () => {
-          console.warn('Proxied HLS failed, trying raw URL')
-          loadWithHls(src, null)
-        })
-      } else {
-        video.src = src
-        video.play().catch(() => {})
-      }
-    }
-
-    if (window.Hls) {
-      init()
-    } else {
-      const existing = document.getElementById('hls-script')
-      if (existing) {
-        existing.addEventListener('load', init, { once: true })
-      } else {
-        const s = document.createElement('script')
-        s.id = 'hls-script'
-        s.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js'
-        s.onload = init
-        document.head.appendChild(s)
-      }
-    }
-
-    return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy()
-        hlsRef.current = null
-      }
-    }
-  }, [src])
-
-  return (
-    <video
-      ref={videoRef}
-      poster={poster}
-      controls
-      crossOrigin="anonymous"
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#000', display: 'block' }}
-    >
-      {subtitles.filter(s => s.lang && s.url).map((s, i) => (
-        <track key={i} kind="subtitles" src={s.url} label={s.lang} default={s.lang === 'English' && i === 0} />
-      ))}
-    </video>
-  )
+// Build megaplay iframe URL
+// https://megaplay.buzz/stream/s-2/{numeric-ep-id}/{language}
+function megaplayUrl(numericEpId, lang) {
+  return `https://megaplay.buzz/stream/s-2/${numericEpId}/${lang}`
 }
 
-/* ── Player: server list + source loading ── */
-function Player({ animeId, rawEpisodeId, lang, poster }) {
-  const [state, setState] = useState('loading')
-  const [src, setSrc] = useState('')
-  const [subtitles, setSubtitles] = useState([])
-  const [errorMsg, setErrorMsg] = useState('')
-  const [subServers, setSubServers] = useState([])
-  const [dubServers, setDubServers] = useState([])
-  const [activeServer, setActiveServer] = useState('')
-  const [loadingServer, setLoadingServer] = useState(false)
+/* ── Iframe Player ── */
+function IframePlayer({ numericEpId, lang }) {
+  const src = megaplayUrl(numericEpId, lang)
 
-  useEffect(() => {
-    if (!rawEpisodeId) return
-    setState('loading')
-    setSrc('')
-    setSubtitles([])
-    setSubServers([])
-    setDubServers([])
-    setActiveServer('')
-    setErrorMsg('')
-
-    fetchServers(animeId, rawEpisodeId)
-      .then(data => {
-        const sub = Array.isArray(data?.sub) ? data.sub : []
-        const dub = Array.isArray(data?.dub) ? data.dub : []
-        setSubServers(sub)
-        setDubServers(dub)
-
-        if (!sub.length && !dub.length) throw new Error('No servers available for this episode')
-
-        const preferred = (lang === 'dub' ? dub : sub)[0] || sub[0] || dub[0]
-        if (!preferred) throw new Error('No servers available')
-
-        const preferredLang = (lang === 'dub' && dub.length > 0) ? 'dub' : 'sub'
-        setActiveServer(preferred.serverName)
-        return doLoadSource(preferred.serverName, preferredLang, sub, dub)
-      })
-      .catch(err => {
-        console.error('fetchServers error:', err)
-        setErrorMsg(err.message || 'Could not load servers.')
-        setState('error')
-      })
-  }, [animeId, rawEpisodeId, lang])
-
-  function doLoadSource(serverName, category, sub, dub) {
-    setLoadingServer(true)
-    setState('loading')
-
-    const dubList = dub || dubServers
-    const subList = sub || subServers
-    const dubNames = dubList.map(s => s.serverName)
-    const subNames = subList.map(s => s.serverName)
-    let resolvedLang = category
-    if (category === 'dub' && !dubNames.includes(serverName) && subNames.includes(serverName)) {
-      resolvedLang = 'sub'
-    }
-
-    return fetchSources(animeId, rawEpisodeId, serverName, resolvedLang)
-      .then(data => {
-        const sources = Array.isArray(data?.sources) ? data.sources : []
-        if (!sources.length) throw new Error('No stream sources returned')
-        const best = sources.find(s => s.isM3U8) || sources[0]
-        if (!best?.url) throw new Error('No valid stream URL found')
-        setSrc(best.url)
-        setSubtitles(Array.isArray(data?.subtitles) ? data.subtitles : [])
-        setState('playing')
-        setLoadingServer(false)
-      })
-      .catch(err => {
-        console.error('fetchSources error:', err)
-        setErrorMsg(err.message || 'This server failed. Try another server.')
-        setState('error')
-        setLoadingServer(false)
-      })
-  }
-
-  function switchServer(serverName, type) {
-    if (serverName === activeServer && state === 'playing') return
-    setActiveServer(serverName)
-    setSrc('')
-    setSubtitles([])
-    doLoadSource(serverName, type === 'DUB' ? 'dub' : 'sub')
-  }
-
-  const allServers = [
-    ...subServers.map(s => ({ name: s.serverName, type: 'SUB' })),
-    ...dubServers
-      .filter(d => !subServers.find(s => s.serverName === d.serverName))
-      .map(s => ({ name: s.serverName, type: 'DUB' })),
-  ]
+  if (!numericEpId) return <div className="pload"><Spin /></div>
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ position: 'relative', flex: 1 }}>
-        {state === 'loading' && <div className="pload"><Spin /></div>}
-        {state === 'error' && (
-          <div className="perror">
-            <svg width="36" height="36" fill="none" stroke="var(--acc2)" strokeWidth="1.5" viewBox="0 0 24 24" style={{ marginBottom: '8px' }}>
-              <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><circle cx="12" cy="16" r=".6" fill="var(--acc2)" />
-            </svg>
-            <h4 style={{ marginBottom: '6px' }}>Could not load episode</h4>
-            <p style={{ fontSize: '13px', color: 'var(--dim)', marginBottom: '12px' }}>{errorMsg}</p>
-            {allServers.length > 1 && (
-              <p style={{ fontSize: '12px', color: 'var(--dim)', marginBottom: '10px' }}>Try a different server below ↓</p>
-            )}
-            <button className="bp" onClick={() => doLoadSource(activeServer, lang)} style={{ fontSize: '12px', padding: '8px 18px' }}>
-              Retry
-            </button>
-          </div>
-        )}
-        {state === 'playing' && src && (
-          <HLSPlayer src={src} poster={poster} subtitles={subtitles} />
-        )}
-      </div>
-
-      {allServers.length > 0 && (
-        <div className="server-bar">
-          <span className="server-label">Server:</span>
-          <div className="server-btns">
-            {allServers.map(s => (
-              <button
-                key={s.name}
-                className={'server-btn' + (activeServer === s.name ? ' on' : '')}
-                onClick={() => switchServer(s.name, s.type)}
-                disabled={loadingServer}
-                title={`${s.name} (${s.type})`}
-              >
-                {s.name}
-                <span className="server-type-badge">{s.type}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    <iframe
+      key={src} // remount on src change
+      src={src}
+      width="100%"
+      height="100%"
+      frameBorder="0"
+      scrolling="no"
+      allowFullScreen
+      allow="autoplay; fullscreen; picture-in-picture"
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none', background: '#000' }}
+    />
   )
 }
 
@@ -283,7 +59,7 @@ export default function Watch() {
   const [theatre, setTheatre] = useState(false)
   const [autoNext, setAutoNext] = useState(false)
   const [episodes, setEpisodes] = useState([])
-  const [rawEpisodeId, setRawEpisodeId] = useState(null)
+  const [numericEpId, setNumericEpId] = useState(null)
   const [animeInfo, setAnimeInfo] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -292,6 +68,7 @@ export default function Watch() {
   const swipeX = useRef(null)
   const swipeY = useRef(null)
 
+  // Load episode list on mount
   useEffect(() => {
     if (!id || !ep) { go('home'); return }
     pbStart()
@@ -307,7 +84,7 @@ export default function Watch() {
         const epObj = eps.find(e => e.episodeNo === Number(ep))
         if (!epObj) throw new Error(`Episode ${ep} not found`)
 
-        setRawEpisodeId(epObj.episodeId)
+        setNumericEpId(extractNumericEpId(epObj.episodeId))
 
         const title = route.name || id
         setAnimeInfo({ title, poster: '' })
@@ -324,23 +101,26 @@ export default function Watch() {
       })
   }, [id])
 
+  // Update numericEpId when ep changes
   useEffect(() => {
     if (!episodes.length) return
     const epObj = episodes.find(e => e.episodeNo === Number(ep))
     if (!epObj) return
-    setRawEpisodeId(epObj.episodeId)
+    setNumericEpId(extractNumericEpId(epObj.episodeId))
     if (animeInfo) {
       saveCW(id, Number(ep), lang, animeInfo.title, animeInfo.title, '')
       document.title = `${animeInfo.title} - Episode ${ep} - anidexz`
     }
   }, [ep, episodes])
 
+  // Sync URL
   useEffect(() => {
     if (!animeInfo) return
     const next = { view: 'watch', id, name: animeInfo.title, titleAlt: animeInfo.title, ep, lang }
     try { history.replaceState(next, '', buildURL(next)) } catch {}
   }, [lang, ep])
 
+  // Auto-next
   const startAutoNext = useCallback((maxEp) => {
     clearInterval(autoNextTimer.current)
     if (!autoNext || Number(ep) >= maxEp) return
@@ -355,6 +135,7 @@ export default function Watch() {
     }, 1000)
   }, [autoNext, ep, id, lang, animeInfo, go, toast])
 
+  // Keyboard shortcuts
   useEffect(() => {
     function onKey(e) {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
@@ -391,7 +172,7 @@ export default function Watch() {
     </div>
   )
 
-  const { title, poster } = animeInfo
+  const { title } = animeInfo
   const maxEp = episodes[episodes.length - 1]?.episodeNo || episodes.length
   const epNum = Number(ep)
   const stitle = title.length > 22 ? title.slice(0, 22) + '...' : title
@@ -419,10 +200,7 @@ export default function Watch() {
               swipeX.current = null; swipeY.current = null
             }}
           >
-            {rawEpisodeId
-              ? <Player animeId={id} rawEpisodeId={rawEpisodeId} lang={lang} poster={poster} />
-              : <div className="pload"><Spin /></div>
-            }
+            <IframePlayer numericEpId={numericEpId} lang={lang} />
           </div>
 
           <div className="winfo">
@@ -467,11 +245,9 @@ export default function Watch() {
           </div>
         </div>
 
+        {/* Sidebar */}
         <div className="sbar">
-          <div className="sbar-title">
-            {poster && <img src={poster} style={{ width: '26px', height: '26px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }} loading="lazy" alt="" />}
-            {stitle}
-          </div>
+          <div className="sbar-title">{stitle}</div>
           <div className="eplist" id="eplist">
             {epNums.map(n => (
               <div
@@ -488,6 +264,7 @@ export default function Watch() {
         </div>
       </div>
 
+      {/* Mobile episode grid */}
       <div className="mob-ep-wrap">
         <div className="mob-ep-title">Episodes</div>
         <div className="epgrid">
