@@ -5,6 +5,11 @@ import { saveCW } from '../storage.js'
 import { Spin } from '../components/Shared.jsx'
 
 const BASE = 'https://anidexz-api.vercel.app/aniwatch'
+const HINDI_BASE = 'https://anime-world-india-api-jade.vercel.app'
+
+// ── Module-level cache — survives episode navigation, resets on full page reload ──
+// Map<animeId, { status: 'available'|'unavailable', episodes: Array }>
+const hindiCache = new Map()
 
 /* ── API ── */
 async function fetchEpisodes(animeId) {
@@ -13,8 +18,66 @@ async function fetchEpisodes(animeId) {
   return res.json()
 }
 
-// Extract just the numeric ep ID from episodeId string
-// "one-piece-100?ep=84802" → "84802"
+/**
+ * ONE request to /api/info/{id} — gives us availability + all episode IDs.
+ * Caches in `hindiCache` so switching episodes never re-fetches.
+ */
+async function loadHindiData(animeId) {
+  if (hindiCache.has(animeId)) return hindiCache.get(animeId)
+
+  try {
+    const res = await fetch(`${HINDI_BASE}/api/info/${animeId}`)
+    if (!res.ok) {
+      const result = { status: 'unavailable', episodes: [] }
+      hindiCache.set(animeId, result)
+      return result
+    }
+    const data = await res.json()
+
+    // Normalise — API may nest episodes differently
+    const eps =
+      data?.episodes ||
+      data?.data?.episodes ||
+      data?.season?.episodes ||
+      []
+
+    const hasContent = Array.isArray(eps) ? eps.length > 0 : !!data?.title
+
+    const result = {
+      status: hasContent ? 'available' : 'unavailable',
+      episodes: Array.isArray(eps) ? eps : [],
+    }
+    hindiCache.set(animeId, result)
+    return result
+  } catch {
+    const result = { status: 'unavailable', episodes: [] }
+    hindiCache.set(animeId, result)
+    return result
+  }
+}
+
+async function fetchHindiEmbed(episodeId) {
+  try {
+    const res = await fetch(`${HINDI_BASE}/api/embed/${episodeId}`)
+    if (!res.ok) return null
+    return res.json()
+  } catch {
+    return null
+  }
+}
+
+function pickEmbedUrl(data) {
+  if (!data) return null
+  const servers = data?.servers || data?.links || data?.sources || []
+  if (Array.isArray(servers) && servers.length) {
+    const play = servers.find(s =>
+      s.name?.toLowerCase().includes('play') || s.server?.toLowerCase().includes('play')
+    )
+    return play?.url || play?.link || servers[0]?.url || servers[0]?.link || null
+  }
+  return data?.url || data?.embed || null
+}
+
 function extractNumericEpId(rawEpisodeId) {
   if (!rawEpisodeId) return ''
   const str = String(rawEpisodeId)
@@ -24,21 +87,21 @@ function extractNumericEpId(rawEpisodeId) {
   return str
 }
 
-// Build megaplay iframe URL
-// https://megaplay.buzz/stream/s-2/{numeric-ep-id}/{language}
 function megaplayUrl(numericEpId, lang) {
   return `https://megaplay.buzz/stream/s-2/${numericEpId}/${lang}`
 }
 
 /* ── Iframe Player ── */
-function IframePlayer({ numericEpId, lang }) {
-  const src = megaplayUrl(numericEpId, lang)
+function IframePlayer({ numericEpId, lang, hindiSrc }) {
+  const src = lang === 'hindi' && hindiSrc
+    ? hindiSrc
+    : megaplayUrl(numericEpId, lang === 'hindi' ? 'sub' : lang)
 
-  if (!numericEpId) return <div className="pload"><Spin /></div>
+  if (!numericEpId && !hindiSrc) return <div className="pload"><Spin /></div>
 
   return (
     <iframe
-      key={src} // remount on src change
+      key={src}
       src={src}
       width="100%"
       height="100%"
@@ -49,6 +112,28 @@ function IframePlayer({ numericEpId, lang }) {
       style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none', background: '#000' }}
     />
   )
+}
+
+/* ── Hindi Status Badge ── */
+function HindiBadge({ status }) {
+  if (status === 'checking') return (
+    <span style={{ fontSize: '10px', color: 'var(--dim)', marginLeft: '4px' }}>…</span>
+  )
+  if (status === 'available') return (
+    <span style={{
+      fontSize: '9px', background: '#ff6b00', color: '#fff',
+      borderRadius: '3px', padding: '1px 4px', marginLeft: '4px',
+      fontWeight: 700, letterSpacing: '0.03em',
+    }}>HI</span>
+  )
+  if (status === 'unavailable') return (
+    <span style={{
+      fontSize: '9px', background: 'var(--dim)', color: '#fff',
+      borderRadius: '3px', padding: '1px 4px', marginLeft: '4px',
+      fontWeight: 700, opacity: 0.6,
+    }}>—</span>
+  )
+  return null
 }
 
 /* ── Main Watch page ── */
@@ -63,12 +148,24 @@ export default function Watch() {
   const [animeInfo, setAnimeInfo] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  // Hindi — hydrate from cache immediately if we already checked this anime
+  const [hindiStatus, setHindiStatus] = useState(() =>
+    hindiCache.has(id) ? hindiCache.get(id).status : 'idle'
+  )
+  const [hindiEpisodes, setHindiEpisodes] = useState(() =>
+    hindiCache.has(id) ? hindiCache.get(id).episodes : []
+  )
+  const [hindiSrc, setHindiSrc] = useState(null)
+  const [hindiLoading, setHindiLoading] = useState(false)
+
   const autoNextTimer = useRef(null)
+  const hindiCheckTimer = useRef(null)
   const pwrapRef = useRef(null)
   const swipeX = useRef(null)
   const swipeY = useRef(null)
 
-  // Load episode list on mount
+  // ── Main episode load ──
   useEffect(() => {
     if (!id || !ep) { go('home'); return }
     pbStart()
@@ -100,6 +197,78 @@ export default function Watch() {
         pbDone()
       })
   }, [id])
+
+  // ── Hindi check: 15s delay, then ONE request, cached forever ──
+  useEffect(() => {
+    if (!id) return
+
+    // Already cached — skip timer, apply immediately
+    if (hindiCache.has(id)) {
+      const cached = hindiCache.get(id)
+      setHindiStatus(cached.status)
+      setHindiEpisodes(cached.episodes)
+      return
+    }
+
+    // Wait 15 seconds before hitting the Hindi API
+    setHindiStatus('idle')
+    hindiCheckTimer.current = setTimeout(() => {
+      setHindiStatus('checking')
+      loadHindiData(id).then(result => {
+        setHindiStatus(result.status)
+        setHindiEpisodes(result.episodes)
+      })
+    }, 15000)
+
+    return () => clearTimeout(hindiCheckTimer.current)
+  }, [id])
+
+  // ── Load Hindi embed when switching to Hindi lang ──
+  useEffect(() => {
+    if (lang !== 'hindi') { setHindiSrc(null); return }
+    if (hindiStatus !== 'available') return
+
+    setHindiLoading(true)
+    setHindiSrc(null)
+
+    const epNum = Number(ep)
+    const hindiEp = hindiEpisodes.find(e =>
+      e.episodeNo === epNum ||
+      e.episode  === epNum ||
+      e.number   === epNum ||
+      e.ep       === epNum ||
+      Number(e.episodeNo) === epNum
+    )
+
+    const episodeId = hindiEp?.episodeId || hindiEp?.id || `${id}-episode-${epNum}`
+
+    fetchHindiEmbed(episodeId)
+      .then(data => {
+        const url = pickEmbedUrl(data)
+        if (url) {
+          setHindiSrc(url)
+          toast('Hindi Dub loaded ✓')
+          setHindiLoading(false)
+          return
+        }
+        // Last resort: generic scraper
+        const scrapeTarget = `${HINDI_BASE}/watch/${episodeId}`
+        return fetch(`${HINDI_BASE}/api/scrape?url=${encodeURIComponent(scrapeTarget)}`)
+          .then(r => r.json())
+          .then(scraped => {
+            const src = scraped?.embedUrl || scraped?.url || scraped?.iframe
+            if (src) { setHindiSrc(src); toast('Hindi Dub loaded ✓') }
+            else { toast('Hindi not available for this episode'); setLang('sub') }
+          })
+          .catch(() => { toast('Hindi not available for this episode'); setLang('sub') })
+          .finally(() => setHindiLoading(false))
+      })
+      .catch(() => {
+        toast('Failed to load Hindi dub')
+        setLang('sub')
+        setHindiLoading(false)
+      })
+  }, [lang, ep, hindiEpisodes, hindiStatus])
 
   // Update numericEpId when ep changes
   useEffect(() => {
@@ -178,6 +347,18 @@ export default function Watch() {
   const stitle = title.length > 22 ? title.slice(0, 22) + '...' : title
   const epNums = episodes.map(e => e.episodeNo)
 
+  function handleLangChange(newLang) {
+    if (newLang === 'hindi' && hindiStatus === 'unavailable') {
+      toast('Hindi Dub not available for this anime')
+      return
+    }
+    if (newLang === 'hindi' && (hindiStatus === 'idle' || hindiStatus === 'checking')) {
+      toast('Still checking Hindi availability…')
+      return
+    }
+    setLang(newLang)
+  }
+
   return (
     <>
       <div className={'wlayout' + (theatre ? ' theatre' : '')} id="wlayout">
@@ -200,7 +381,10 @@ export default function Watch() {
               swipeX.current = null; swipeY.current = null
             }}
           >
-            <IframePlayer numericEpId={numericEpId} lang={lang} />
+            {hindiLoading
+              ? <div className="pload"><Spin /></div>
+              : <IframePlayer numericEpId={numericEpId} lang={lang} hindiSrc={hindiSrc} />
+            }
           </div>
 
           <div className="winfo">
@@ -232,9 +416,35 @@ export default function Watch() {
                   <polygon points="5 3 19 12 5 21 5 3" /><line x1="19" x2="19" y1="3" y2="21" />
                 </svg> Auto-Next
               </button>
+
+              {/* Language Toggle — SUB / DUB / हिंदी */}
               <div className="ltog" style={{ marginLeft: 'auto' }}>
-                <button className={'lbtn' + (lang === 'sub' ? ' on' : '')} onClick={() => setLang('sub')}>SUB</button>
-                <button className={'lbtn' + (lang === 'dub' ? ' on' : '')} onClick={() => setLang('dub')}>DUB</button>
+                <button
+                  className={'lbtn' + (lang === 'sub' ? ' on' : '')}
+                  onClick={() => handleLangChange('sub')}
+                >SUB</button>
+                <button
+                  className={'lbtn' + (lang === 'dub' ? ' on' : '')}
+                  onClick={() => handleLangChange('dub')}
+                >DUB</button>
+                <button
+                  className={'lbtn' + (lang === 'hindi' ? ' on' : '')}
+                  onClick={() => handleLangChange('hindi')}
+                  title={
+                    hindiStatus === 'available'   ? 'Hindi Dub available' :
+                    hindiStatus === 'checking'    ? 'Checking Hindi availability…' :
+                    hindiStatus === 'unavailable' ? 'Hindi Dub not available' :
+                    'Hindi check starts 15s after page load'
+                  }
+                  style={{
+                    position: 'relative',
+                    opacity: hindiStatus === 'unavailable' ? 0.4 : 1,
+                    cursor: hindiStatus === 'unavailable' ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  हिंदी
+                  <HindiBadge status={hindiStatus} />
+                </button>
               </div>
             </div>
             <div className="kb-hint">
