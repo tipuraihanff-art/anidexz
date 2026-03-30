@@ -83,6 +83,7 @@ export default function Detail() {
   const id = route.id
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('tab-eps')
   const [inWl, setInWl] = useState(false)
 
@@ -90,9 +91,10 @@ export default function Detail() {
     if (!id) { go('home'); return }
     pbStart()
     setLoading(true)
+    setError(null)
     fetchDetail(id)
       .then(d => {
-        if (!d?.info) throw new Error('Not found')
+        if (!d?.info) throw new Error('Anime not found')
         setData(d)
         setInWl(isWL(d.info.id))
         addRV(d.info.id, d.info.name, d.info.name, d.info.img)
@@ -102,23 +104,38 @@ export default function Detail() {
         setLoading(false)
         pbDone()
       })
-      .catch(() => { setLoading(false); pbDone() })
+      .catch(err => {
+        console.error('Detail fetch error:', err)
+        setError(err.message)
+        setLoading(false)
+        pbDone()
+      })
   }, [id])
 
-  if (loading || !data) return <Spin />
+  if (loading) return <Spin />
+
+  if (error || !data) return (
+    <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--dim)' }}>
+      <p style={{ color: 'var(--fg)', fontSize: '20px', marginBottom: '10px' }}>Failed to load</p>
+      <p style={{ fontSize: '13px', marginBottom: '20px' }}>{error || 'Unknown error'}</p>
+      <button className="bp" onClick={() => go('home')}>Go Home</button>
+    </div>
+  )
 
   const { info, moreInfo = {}, seasons = [], relatedAnimes = [], recommendedAnimes = [] } = data
 
-  const genres  = moreInfo['Genres'] || []
-  const studios = moreInfo['Studios:'] || []
-  const status  = moreInfo['Status:'] || ''
-  const aired   = moreInfo['Aired:'] || ''
-  const score   = moreInfo['MAL Score:'] || ''
-  const syn     = (info.description || 'No synopsis.').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim()
+  // ── Safe array helpers ──
+  const genres   = Array.isArray(moreInfo['Genres'])    ? moreInfo['Genres']    : []
+  const studios  = Array.isArray(moreInfo['Studios:'])  ? moreInfo['Studios:']  : []
+  const producers = Array.isArray(moreInfo['Producers']) ? moreInfo['Producers'] : []
+  const status   = moreInfo['Status:']    || ''
+  const aired    = moreInfo['Aired:']     || ''
+  const score    = moreInfo['MAL Score:'] || ''
+  const syn      = (info.description || 'No synopsis.').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim()
 
   const tabs = [
     { id: 'tab-eps',  label: 'Episodes' },
-    ...(relatedAnimes.length    ? [{ id: 'tab-rel',  label: 'Relations' }]   : []),
+    ...(relatedAnimes.length     ? [{ id: 'tab-rel',  label: 'Relations' }]   : []),
     ...(recommendedAnimes.length ? [{ id: 'tab-recs', label: 'Recommended' }] : []),
     ...(seasons.length           ? [{ id: 'tab-seas', label: 'Seasons' }]     : []),
   ]
@@ -202,7 +219,7 @@ export default function Detail() {
             ['Premiered', moreInfo['Premiered:']],
             ['Duration',  moreInfo['Duration:']],
             ['Synonyms',  moreInfo['Synonyms:']],
-            ['Producers', (moreInfo['Producers'] || []).join(', ')],
+            ['Producers', producers.join(', ')],
           ].filter(([, v]) => v).map(([label, val]) => (
             <div key={label} style={{ fontSize: '12px', color: 'var(--dim)' }}>
               <span style={{ color: 'var(--fg)', fontWeight: 600 }}>{label}: </span>{val}
