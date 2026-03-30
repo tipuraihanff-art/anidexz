@@ -6,9 +6,11 @@ import { Spin } from '../components/Shared.jsx'
 
 const BASE = 'https://anidexz-api.vercel.app/aniwatch'
 
-// CORS / auth proxy — wraps the m3u8 URL so the browser can load it
-// This proxy forwards the required Referer/User-Agent headers server-side
-const PROXY = 'https://cors-anywhere.herokuapp.com/'
+/* ── Proxy: rewrites m3u8 URL through allorigins so CORS + Referer are bypassed ── */
+function proxied(url) {
+  if (!url) return url
+  return `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+}
 
 /* ── API helpers ── */
 async function fetchEpisodes(animeId) {
@@ -34,7 +36,6 @@ async function fetchSources(animeId, rawEpisodeId, server, lang) {
   return res.json()
 }
 
-// "one-piece-100?ep=84802" → "84802"
 function extractNumericEpId(rawEpisodeId) {
   if (!rawEpisodeId) return ''
   const str = String(rawEpisodeId)
@@ -44,16 +45,8 @@ function extractNumericEpId(rawEpisodeId) {
   return str
 }
 
-// Proxy a stream URL through CORS proxy
-function proxyUrl(url) {
-  if (!url) return url
-  // Already proxied or relative
-  if (url.startsWith(PROXY)) return url
-  return PROXY + url
-}
-
 /* ── HLS Video Player ── */
-function HLSPlayer({ src, poster, subtitles = [], headers = {} }) {
+function HLSPlayer({ src, poster, subtitles = [] }) {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
 
@@ -66,19 +59,11 @@ function HLSPlayer({ src, poster, subtitles = [], headers = {} }) {
       hlsRef.current = null
     }
 
-    // Try proxied first, then raw
-    const tryLoad = (streamUrl, fallback) => {
+    // We try proxied URL first, then fall back to raw URL
+    const loadWithHls = (streamUrl, onFatalError) => {
       const Hls = window.Hls
       if (Hls && Hls.isSupported()) {
-        const hls = new Hls({
-          enableWorker: false,
-          xhrSetup: (xhr, xhrUrl) => {
-            // Set referer header via proxy if needed
-            if (headers?.Referer) {
-              try { xhr.setRequestHeader('Referer', headers.Referer) } catch {}
-            }
-          },
-        })
+        const hls = new Hls({ enableWorker: false })
         hlsRef.current = hls
         hls.loadSource(streamUrl)
         hls.attachMedia(video)
@@ -86,11 +71,10 @@ function HLSPlayer({ src, poster, subtitles = [], headers = {} }) {
           video.play().catch(() => {})
         })
         hls.on(Hls.Events.ERROR, (event, data) => {
-          if (data.fatal && fallback) {
-            console.warn('HLS failed, trying fallback URL')
+          if (data.fatal) {
             hls.destroy()
             hlsRef.current = null
-            tryLoad(fallback, null)
+            if (onFatalError) onFatalError()
           }
         })
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -102,10 +86,13 @@ function HLSPlayer({ src, poster, subtitles = [], headers = {} }) {
       }
     }
 
-    const initHls = () => {
+    const init = () => {
       if (src.includes('.m3u8')) {
-        // Try proxied URL first, fall back to raw URL
-        tryLoad(proxyUrl(src), src)
+        // Try proxied first, fall back to raw
+        loadWithHls(proxied(src), () => {
+          console.warn('Proxied HLS failed, trying raw URL')
+          loadWithHls(src, null)
+        })
       } else {
         video.src = src
         video.play().catch(() => {})
@@ -113,16 +100,16 @@ function HLSPlayer({ src, poster, subtitles = [], headers = {} }) {
     }
 
     if (window.Hls) {
-      initHls()
+      init()
     } else {
       const existing = document.getElementById('hls-script')
       if (existing) {
-        existing.addEventListener('load', initHls, { once: true })
+        existing.addEventListener('load', init, { once: true })
       } else {
         const s = document.createElement('script')
         s.id = 'hls-script'
         s.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js'
-        s.onload = initHls
+        s.onload = init
         document.head.appendChild(s)
       }
     }
@@ -154,7 +141,6 @@ function HLSPlayer({ src, poster, subtitles = [], headers = {} }) {
 function Player({ animeId, rawEpisodeId, lang, poster }) {
   const [state, setState] = useState('loading')
   const [src, setSrc] = useState('')
-  const [headers, setHeaders] = useState({})
   const [subtitles, setSubtitles] = useState([])
   const [errorMsg, setErrorMsg] = useState('')
   const [subServers, setSubServers] = useState([])
@@ -166,7 +152,6 @@ function Player({ animeId, rawEpisodeId, lang, poster }) {
     if (!rawEpisodeId) return
     setState('loading')
     setSrc('')
-    setHeaders({})
     setSubtitles([])
     setSubServers([])
     setDubServers([])
@@ -216,7 +201,6 @@ function Player({ animeId, rawEpisodeId, lang, poster }) {
         const best = sources.find(s => s.isM3U8) || sources[0]
         if (!best?.url) throw new Error('No valid stream URL found')
         setSrc(best.url)
-        setHeaders(data?.headers || {})
         setSubtitles(Array.isArray(data?.subtitles) ? data.subtitles : [])
         setState('playing')
         setLoadingServer(false)
@@ -233,7 +217,6 @@ function Player({ animeId, rawEpisodeId, lang, poster }) {
     if (serverName === activeServer && state === 'playing') return
     setActiveServer(serverName)
     setSrc('')
-    setHeaders({})
     setSubtitles([])
     doLoadSource(serverName, type === 'DUB' ? 'dub' : 'sub')
   }
@@ -265,7 +248,7 @@ function Player({ animeId, rawEpisodeId, lang, poster }) {
           </div>
         )}
         {state === 'playing' && src && (
-          <HLSPlayer src={src} poster={poster} subtitles={subtitles} headers={headers} />
+          <HLSPlayer src={src} poster={poster} subtitles={subtitles} />
         )}
       </div>
 
