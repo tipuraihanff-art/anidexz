@@ -1,72 +1,91 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useApp } from '../AppContext.jsx'
-import { alQuery, Q_LIST, buildVars, fetchLatestReleasedWithAniListIds, fetchRecentlyUpdatedViaJikan } from '../api.js'
-import { alTitle, alTitleAlt, alImg } from '../helpers.js'
 import { getCW, getRV } from '../storage.js'
 import { Card, Section, HSection, Spin, Empty } from '../components/Shared.jsx'
 
+const BASE = 'https://anime-iota-one.vercel.app/aniwatch'
+
+async function fetchHome() {
+  const res = await fetch(`${BASE}/`)
+  if (!res.ok) throw new Error(`AniWatch home failed: ${res.status}`)
+  return res.json()
+}
+
+/* ─── Hero ─────────────────────────────────────────────────── */
 function Hero({ list }) {
   const { go } = useApp()
   const [idx, setIdx] = useState(0)
   const tickRef = useRef(null)
+
   useEffect(() => {
     if (!list.length) return
     clearInterval(tickRef.current)
     tickRef.current = setInterval(() => setIdx(i => (i + 1) % list.length), 6000)
     return () => clearInterval(tickRef.current)
   }, [list])
+
   if (!list.length) return null
   const m = list[idx]
-  const title = alTitle(m)
-  const titleAlt = alTitleAlt(m)
-  const desc = (m.description || '').replace(/<[^>]+>/g, '').replace(/\[Written[^\]]*\]/g, '').trim()
-  const bg = m.bannerImage || alImg(m, 'extraLarge')
+  const desc = (m.descriptions || '').replace(/<[^>]+>/g, '').trim()
+
   return (
     <div className="hero">
-      <div className="hero-bg" style={{ backgroundImage: `url(${bg})` }} />
+      <div className="hero-bg" style={{ backgroundImage: `url(${m.img})` }} />
       <div className="hero-grad" />
       <div className="hero-cnt">
         <div className="hero-badge">Spotlight</div>
-        <h1 className="hero-title">{title}</h1>
+        <h1 className="hero-title">{m.name}</h1>
         <p className="hero-desc">{desc.length > 200 ? desc.slice(0, 200) + '...' : desc}</p>
         <div className="hero-btns">
-          <button className="bp" onClick={() => go('watch', { id: m.id, name: title, titleAlt, ep: 1 })}>Watch Now</button>
-          <button className="bs" onClick={() => go('anime', { id: m.id, name: title, titleAlt })}>Info</button>
+          <button className="bp" onClick={() => go('watch', { id: m.id, name: m.name, titleAlt: m.name, ep: 1 })}>
+            Watch Now
+          </button>
+          <button className="bs" onClick={() => go('anime', { id: m.id, name: m.name, titleAlt: m.name })}>
+            Info
+          </button>
         </div>
       </div>
     </div>
   )
 }
 
-function LatestEpCard({ card }) {
+/* ─── Latest Episode Card (horizontal strip) ───────────────── */
+function LatestEpCard({ item }) {
   const { go } = useApp()
+  const eps = item.episodes || {}
+  const epNum = eps.eps || eps.sub || 1
+
   return (
     <div
       className="hcard"
-      style={{ width: '130px', flexShrink: 0, cursor: card.alId ? 'pointer' : 'default' }}
-      onClick={() => card.alId && go('watch', { id: card.alId, name: card.title, titleAlt: card.title, ep: card.epNum })}
+      style={{ width: '130px', flexShrink: 0, cursor: 'pointer' }}
+      onClick={() => go('watch', { id: item.id, name: item.name, titleAlt: item.name, ep: epNum })}
     >
-      <div className="ep-badge">EP {card.epNum}</div>
+      <div className="ep-badge">EP {epNum}</div>
       <img
-        src={card.img} alt={card.title} loading="lazy"
+        src={item.img}
+        alt={item.name}
+        loading="lazy"
         style={{ width: '130px', height: '80px', objectFit: 'cover', display: 'block' }}
         onError={e => { e.target.src = 'https://placehold.co/130x80/0d0d15/555577?text=N/A' }}
       />
       <div className="hcard-info">
-        <div className="hcard-title">{card.title}</div>
-        <div className="hcard-sub">{card.epTitle}</div>
+        <div className="hcard-title">{item.name}</div>
+        <div className="hcard-sub">{item.duration || ''}</div>
       </div>
     </div>
   )
 }
 
-function RankedCard({ m, rank }) {
+/* ─── Ranked Card ───────────────────────────────────────────── */
+function RankedCard({ item, rank }) {
   const { go } = useApp()
-  const title = alTitle(m)
-  const titleAlt = alTitleAlt(m)
   return (
-    <div className="hcard" style={{ position: 'relative', cursor: 'pointer' }}
-      onClick={() => go('anime', { id: m.id, name: title, titleAlt })}>
+    <div
+      className="hcard"
+      style={{ position: 'relative', cursor: 'pointer' }}
+      onClick={() => go('anime', { id: item.id, name: item.name, titleAlt: item.name })}
+    >
       <div style={{
         position: 'absolute', top: 0, left: 0,
         background: 'var(--accent, #7c3aed)',
@@ -74,112 +93,132 @@ function RankedCard({ m, rank }) {
         fontSize: rank <= 3 ? '18px' : '14px',
         width: '28px', height: '28px',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        borderRadius: '0 0 6px 0', zIndex: 2
+        borderRadius: '0 0 6px 0', zIndex: 2,
       }}>{rank}</div>
-      <img src={alImg(m, 'large')} alt={title} loading="lazy"
+      <img
+        src={item.img}
+        alt={item.name}
+        loading="lazy"
         style={{ width: '108px', height: '152px', objectFit: 'cover' }}
         onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }}
       />
       <div className="hcard-info">
-        <div className="hcard-title">{title}</div>
-        <div className="hcard-sub">{m.averageScore ? `⭐ ${m.averageScore / 10}/10` : m.format}</div>
+        <div className="hcard-title">{item.name}</div>
+        <div className="hcard-sub">{item.episodes ? `EP ${item.episodes.eps || '?'}` : ''}</div>
       </div>
     </div>
   )
 }
 
+/* ─── Generic AniWatch Card ─────────────────────────────────── */
+function AWCard({ item, delay = 0 }) {
+  const { go } = useApp()
+  const eps = item.episodes || {}
+  const sub = [
+    eps.eps ? `EP ${eps.eps}` : null,
+    item.duration || null,
+    item.rated ? '18+' : null,
+  ].filter(Boolean).join(' · ')
+
+  return (
+    <div
+      className="hcard"
+      style={{ cursor: 'pointer', animationDelay: `${delay}ms` }}
+      onClick={() => go('anime', { id: item.id, name: item.name, titleAlt: item.name })}
+    >
+      <img
+        src={item.img}
+        alt={item.name}
+        loading="lazy"
+        style={{ width: '108px', height: '152px', objectFit: 'cover' }}
+        onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }}
+      />
+      <div className="hcard-info">
+        <div className="hcard-title">{item.name}</div>
+        {sub && <div className="hcard-sub">{sub}</div>}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Home ──────────────────────────────────────────────────── */
 export default function Home() {
   const { go, pbStart, pbDone } = useApp()
-  const [airingList,    setAiringList]    = useState([])
-  const [movieList,     setMovieList]     = useState([])
-  const [updatedList,   setUpdatedList]   = useState([])
-  const [latestCards,   setLatestCards]   = useState([])
-  const [top10List,     setTop10List]     = useState([])
-  const [upcomingList,  setUpcomingList]  = useState([])
-  const [completedList, setCompletedList] = useState([])
-  const [seasonList,    setSeasonList]    = useState([])
-  const [cw] = useState(() => getCW())
-  const [rv] = useState(() => getRV())
+  const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
-
-  const getSeason = () => {
-    const m = new Date().getMonth()
-    if (m < 3) return 'WINTER'
-    if (m < 6) return 'SPRING'
-    if (m < 9) return 'SUMMER'
-    return 'FALL'
-  }
+  const [cw] = useState(() => getCW())
+  const [rv] = useState(() => getRV())
 
   useEffect(() => {
     pbStart()
-    setLoading(true)
-    Promise.all([
-      alQuery(Q_LIST(), buildVars({ sort: 'TRENDING_DESC', status: 'RELEASING', page: 1 })),
-      alQuery(Q_LIST(), buildVars({ sort: 'POPULARITY_DESC', format: 'MOVIE', page: 1 })),
-      fetchLatestReleasedWithAniListIds(),
-      fetchRecentlyUpdatedViaJikan(),
-      alQuery(Q_LIST(), buildVars({ sort: 'SCORE_DESC', status: 'RELEASING', page: 1 })),
-      alQuery(Q_LIST(), buildVars({ sort: 'POPULARITY_DESC', status: 'NOT_YET_RELEASED', page: 1 })),
-      alQuery(Q_LIST(), buildVars({ sort: 'POPULARITY_DESC', status: 'FINISHED', page: 1 })),
-      alQuery(Q_LIST(), buildVars({ sort: 'POPULARITY_DESC', season: getSeason(), seasonYear: new Date().getFullYear(), page: 1 })),
-    ]).then(([airingD, moviesD, jikanLatest, jikanUpdated, top10D, upcomingD, completedD, seasonD]) => {
-      setAiringList((airingD?.Page?.media) || [])
-      setMovieList((moviesD?.Page?.media) || [])
-      setLatestCards(jikanLatest || [])
-      setUpdatedList(jikanUpdated || [])
-      setTop10List((top10D?.Page?.media) || [])
-      setUpcomingList((upcomingD?.Page?.media) || [])
-      setCompletedList((completedD?.Page?.media) || [])
-      setSeasonList((seasonD?.Page?.media) || [])
-      setLoading(false)
-      pbDone()
-    }).catch(e => {
-      setError(e.message)
-      setLoading(false)
-      pbDone()
-    })
+    fetchHome()
+      .then(d => { setData(d); setLoading(false); pbDone() })
+      .catch(e => { setError(e.message); setLoading(false); pbDone() })
   }, [])
 
   if (loading) return <div id="app"><Spin /></div>
   if (error)   return <div id="app"><Empty title="Failed to Load" body={error} /></div>
 
+  const {
+    spotlightAnimes    = [],
+    trendingAnimes     = [],
+    latestEpisodes     = [],
+    top10Animes        = {},
+    featuredAnimes     = {},
+    topUpcomingAnimes  = [],
+  } = data
+
+  const top10Day      = top10Animes.day  || []
+  const topAiring     = featuredAnimes.topAiringAnimes      || []
+  const mostPopular   = featuredAnimes.mostPopularAnimes    || []
+  const mostFavorite  = featuredAnimes.mostFavoriteAnimes   || []
+  const latestCompleted = featuredAnimes.latestCompletedAnimes || []
+
   return (
     <div>
-      {airingList.length > 0 && <Hero list={airingList.slice(0, 8)} />}
+      {/* HERO — spotlight */}
+      {spotlightAnimes.length > 0 && <Hero list={spotlightAnimes.slice(0, 8)} />}
 
-      {/* LATEST RELEASED - horizontal scroll */}
-      {latestCards.length > 0 && (
-        <Section title="Latest Released">
+      {/* LATEST EPISODES — horizontal strip */}
+      {latestEpisodes.length > 0 && (
+        <Section title="Latest Episodes">
           <div className="hscroll-outer">
             <div className="hscroll">
-              {latestCards.map((card, i) => (
-                <LatestEpCard key={card.malId + '-' + card.epNum + '-' + i} card={card} />
+              {latestEpisodes.map((item, i) => (
+                <LatestEpCard key={item.id + '-' + i} item={item} />
               ))}
             </div>
           </div>
         </Section>
       )}
 
-      {/* LATEST RELEASED EPISODES - grid section */}
-      {latestCards.length > 0 && (
+      {/* LATEST EPISODES — grid */}
+      {latestEpisodes.length > 0 && (
         <Section title="Latest Released Episodes" viewAll="updated">
           <div className="grid">
-            {latestCards.slice(0, 18).map((card, i) => (
+            {latestEpisodes.slice(0, 18).map((item, i) => (
               <div
-                key={card.malId + '-ep-' + i}
+                key={item.id + '-g-' + i}
                 className="hcard"
-                style={{ cursor: card.alId ? 'pointer' : 'default' }}
-                onClick={() => card.alId && go('watch', { id: card.alId, name: card.title, titleAlt: card.title, ep: card.epNum })}
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  const epNum = item.episodes?.eps || item.episodes?.sub || 1
+                  go('watch', { id: item.id, name: item.name, titleAlt: item.name, ep: epNum })
+                }}
               >
                 <img
-                  src={card.img} alt={card.title} loading="lazy"
+                  src={item.img}
+                  alt={item.name}
+                  loading="lazy"
                   style={{ width: '130px', height: '80px', objectFit: 'cover', display: 'block' }}
                   onError={e => { e.target.src = 'https://placehold.co/130x80/0d0d15/555577?text=N/A' }}
                 />
                 <div className="hcard-info">
-                  <div className="hcard-title">{card.title}</div>
-                  <div className="hcard-sub">EP {card.epNum} · {card.epTitle || 'Latest Episode'}</div>
+                  <div className="hcard-title">{item.name}</div>
+                  <div className="hcard-sub">
+                    EP {item.episodes?.eps || item.episodes?.sub || '?'} · {item.duration || 'Latest Episode'}
+                  </div>
                 </div>
               </div>
             ))}
@@ -188,66 +227,98 @@ export default function Home() {
       )}
 
       {/* TOP 10 TODAY */}
-      {top10List.length > 0 && (
+      {top10Day.length > 0 && (
         <Section title="Top 10 Today">
           <div className="hscroll-outer">
             <div className="hscroll">
-              {top10List.slice(0, 10).map((m, i) => (
-                <RankedCard key={m.id} m={m} rank={i + 1} />
+              {top10Day.slice(0, 10).map((item, i) => (
+                <RankedCard key={item.id} item={item} rank={i + 1} />
               ))}
             </div>
           </div>
         </Section>
       )}
 
-      {/* RECENTLY UPDATED */}
-      {updatedList.length > 0 && (
-        <Section title="Recently Updated" viewAll="updated">
-          <div className="grid">
-            {updatedList.slice(0, 18).map((m, i) => <Card key={m.id} m={m} delay={i * 34} />)}
+      {/* TRENDING */}
+      {trendingAnimes.length > 0 && (
+        <Section title="Trending Now" viewAll="trending">
+          <div className="hscroll-outer">
+            <div className="hscroll">
+              {trendingAnimes.map((item, i) => (
+                <div
+                  key={item.id}
+                  className="hcard"
+                  style={{ cursor: 'pointer', flexShrink: 0 }}
+                  onClick={() => go('anime', { id: item.id, name: item.name, titleAlt: item.name })}
+                >
+                  <img
+                    src={item.img}
+                    alt={item.name}
+                    loading="lazy"
+                    style={{ width: '108px', height: '152px', objectFit: 'cover' }}
+                    onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }}
+                  />
+                  <div className="hcard-info">
+                    <div className="hcard-title">{item.name}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </Section>
       )}
 
       {/* TOP AIRING */}
-      <Section title="Top Airing" viewAll="trending">
-        <div className="grid">
-          {airingList.slice(0, 18).map((m, i) => <Card key={m.id} m={m} delay={i * 34} />)}
-        </div>
-      </Section>
-
-      {/* THIS SEASON */}
-      {seasonList.length > 0 && (
-        <Section title={`${getSeason().charAt(0) + getSeason().slice(1).toLowerCase()} ${new Date().getFullYear()}`} viewAll="season">
+      {topAiring.length > 0 && (
+        <Section title="Top Airing" viewAll="top-airing">
           <div className="grid">
-            {seasonList.slice(0, 12).map((m, i) => <Card key={m.id} m={m} delay={i * 34} />)}
+            {topAiring.slice(0, 18).map((item, i) => (
+              <AWCard key={item.id} item={item} delay={i * 34} />
+            ))}
           </div>
         </Section>
       )}
 
-      {/* POPULAR MOVIES */}
-      {movieList.length > 0 && (
-        <Section title="Popular Movies" viewAll="movies">
+      {/* MOST POPULAR */}
+      {mostPopular.length > 0 && (
+        <Section title="Most Popular" viewAll="most-popular">
           <div className="grid">
-            {movieList.slice(0, 12).map((m, i) => <Card key={m.id} m={m} delay={i * 34} />)}
+            {mostPopular.slice(0, 12).map((item, i) => (
+              <AWCard key={item.id} item={item} delay={i * 34} />
+            ))}
           </div>
         </Section>
       )}
 
-      {/* MOST ANTICIPATED */}
-      {upcomingList.length > 0 && (
+      {/* MOST FAVOURITE */}
+      {mostFavorite.length > 0 && (
+        <Section title="Most Favourite" viewAll="most-favourite">
+          <div className="grid">
+            {mostFavorite.slice(0, 12).map((item, i) => (
+              <AWCard key={item.id} item={item} delay={i * 34} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* TOP UPCOMING */}
+      {topUpcomingAnimes.length > 0 && (
         <Section title="Most Anticipated" viewAll="upcoming">
           <div className="grid">
-            {upcomingList.slice(0, 12).map((m, i) => <Card key={m.id} m={m} delay={i * 34} />)}
+            {topUpcomingAnimes.slice(0, 12).map((item, i) => (
+              <AWCard key={item.id} item={item} delay={i * 34} />
+            ))}
           </div>
         </Section>
       )}
 
       {/* COMPLETED SERIES */}
-      {completedList.length > 0 && (
+      {latestCompleted.length > 0 && (
         <Section title="Completed Series" viewAll="completed">
           <div className="grid">
-            {completedList.slice(0, 12).map((m, i) => <Card key={m.id} m={m} delay={i * 34} />)}
+            {latestCompleted.slice(0, 12).map((item, i) => (
+              <AWCard key={item.id} item={item} delay={i * 34} />
+            ))}
           </div>
         </Section>
       )}
@@ -256,14 +327,21 @@ export default function Home() {
       {cw.length > 0 && (
         <HSection title="Continue Watching">
           {cw.map(item => (
-            <div key={item.id} className="hcard"
-              onClick={() => go('watch', { id: item.id, name: item.title, titleAlt: item.titleAlt, ep: item.ep, lang: item.lang })}>
-              <img src={item.poster} alt={item.title} loading="lazy"
+            <div
+              key={item.id}
+              className="hcard"
+              onClick={() => go('watch', { id: item.id, name: item.title, titleAlt: item.titleAlt, ep: item.ep, lang: item.lang })}
+            >
+              <img
+                src={item.poster}
+                alt={item.title}
+                loading="lazy"
                 style={{ width: '108px', height: '152px', objectFit: 'cover' }}
-                onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }} />
+                onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }}
+              />
               <div className="hcard-info">
                 <div className="hcard-title">{item.title}</div>
-                <div className="hcard-sub">EP {item.ep} {item.lang.toUpperCase()}</div>
+                <div className="hcard-sub">EP {item.ep} {item.lang?.toUpperCase()}</div>
               </div>
             </div>
           ))}
@@ -274,11 +352,18 @@ export default function Home() {
       {rv.length > 0 && (
         <HSection title="Recently Viewed">
           {rv.map(item => (
-            <div key={item.id} className="hcard"
-              onClick={() => go('anime', { id: item.id, name: item.title, titleAlt: item.titleAlt || item.title })}>
-              <img src={item.poster} alt={item.title} loading="lazy"
+            <div
+              key={item.id}
+              className="hcard"
+              onClick={() => go('anime', { id: item.id, name: item.title, titleAlt: item.titleAlt || item.title })}
+            >
+              <img
+                src={item.poster}
+                alt={item.title}
+                loading="lazy"
                 style={{ width: '108px', height: '152px', objectFit: 'cover' }}
-                onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }} />
+                onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }}
+              />
               <div className="hcard-info">
                 <div className="hcard-title">{item.title}</div>
               </div>
@@ -286,7 +371,6 @@ export default function Home() {
           ))}
         </HSection>
       )}
-
     </div>
   )
 }
