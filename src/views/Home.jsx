@@ -3,7 +3,7 @@ import { useApp } from '../AppContext.jsx'
 import { getCW, getRV } from '../storage.js'
 import { Card, Section, HSection, Spin, Empty } from '../components/Shared.jsx'
 
-const BASE = 'https://anime-iota-one.vercel.app/aniwatch'
+const BASE = 'https://anidexz-api.vercel.app/aniwatch'
 
 async function fetchHome() {
   const res = await fetch(BASE)
