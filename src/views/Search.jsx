@@ -3,7 +3,7 @@ import { useApp } from '../AppContext.jsx'
 import { buildURL } from '../AppContext.jsx'
 import { Card, Skels, Empty, Sentinel, GenreRow } from '../components/Shared.jsx'
 
-const API_BASE = 'https://api-anime-rouge.vercel.app/aniwatch'
+const API_BASE = 'https://anidexz-api.vercel.app/aniwatch'
 
 export default function Search() {
   const { route, go, pbStart, pbDone, filter, setFilter } = useApp()
@@ -12,12 +12,10 @@ export default function Search() {
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
-  const [totalPages, setTotalPages] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState(null)
   const [genres, setGenres] = useState([])
   const inputRef = useRef(null)
-  const searchButtonRef = useRef(null)
 
   const hasFilters = !!(filter.genre || filter.type || filter.status || filter.year || filter.score)
 
@@ -32,11 +30,10 @@ export default function Search() {
     } catch {}
   }, [searchQuery])
 
-  // Perform search (only when search button is clicked or Enter is pressed)
+  // Perform search
   const performSearch = useCallback(async (resetPage = true) => {
     const query = searchQuery.trim()
     
-    // Don't search if no query and no filters
     if (!query && !hasFilters) {
       setItems([])
       setHasMore(false)
@@ -56,32 +53,17 @@ export default function Search() {
     pbStart()
 
     try {
-      // Build URL with query parameters - URL encode the search query properly
       const encodedQuery = encodeURIComponent(query)
-      let url = `${API_BASE}/search?keyword=${encodedQuery}&page=${currentPage}`
+      const url = `${API_BASE}/search?keyword=${encodedQuery}&page=${currentPage}`
       
-      console.log('Searching URL:', url) // Debug log
-      
-      // Add CORS mode and credentials if needed
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        // Add mode: 'cors' if needed, but it's default
-      })
-      
-      console.log('Response status:', response.status) // Debug log
+      const response = await fetch(url)
       
       if (!response.ok) {
-        throw new Error(`Search failed: ${response.status} ${response.statusText}`)
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
       
       const data = await response.json()
-      console.log('Search results:', data) // Debug log
       
-      // Transform API response to match Card component expectations
       const transformedAnimes = (data.animes || []).map(anime => ({
         id: anime.id,
         title: {
@@ -93,31 +75,29 @@ export default function Search() {
           large: anime.img,
           medium: anime.img
         },
-        format: anime.duration ? 'TV' : 'Unknown',
-        episodes: anime.episodes?.eps || 0,
-        status: 'FINISHED',
+        format: anime.duration?.includes('m') ? 'TV' : 'Movie',
+        episodes: anime.episodes?.eps || anime.episodes?.sub || 0,
+        status: anime.episodes?.eps ? 'FINISHED' : 'RELEASING',
         averageScore: anime.rated ? 75 : 0,
         description: anime.duration || ''
       }))
 
       setItems(prev => resetPage ? transformedAnimes : [...prev, ...transformedAnimes])
       setHasMore(data.hasNextPage || false)
-      setTotalPages(data.totalPages || 0)
       
-      // Store genres if available
       if (data.genres && resetPage) {
         setGenres(data.genres)
       }
       
       if (resetPage) {
-        setPage(2) // Next page will be 2
+        setPage(2)
       } else {
         setPage(prev => prev + 1)
       }
       
     } catch (err) {
       console.error('Search error:', err)
-      setError(err.message || 'Failed to fetch search results. Please check your connection and try again.')
+      setError(err.message || 'Failed to fetch search results')
     } finally {
       if (resetPage) {
         setLoading(false)
@@ -128,14 +108,12 @@ export default function Search() {
     }
   }, [searchQuery, filter, page, hasFilters, pbStart, pbDone])
 
-  // Handle search button click
   const handleSearch = () => {
     if (searchQuery.trim() || hasFilters) {
       performSearch(true)
     }
   }
 
-  // Handle Enter key press
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -143,34 +121,17 @@ export default function Search() {
     }
   }
 
-  // Load more items for pagination
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore) return
     performSearch(false)
   }, [loadingMore, hasMore, performSearch])
 
-  // Handle filter changes - reset search when filters change
+  // Handle filter changes
   useEffect(() => {
     if (searchQuery.trim() || hasFilters) {
       performSearch(true)
     }
-  }, [filter]) // Re-run when filters change
-
-  // Test API connection on mount (optional)
-  useEffect(() => {
-    const testAPI = async () => {
-      try {
-        const testResponse = await fetch(`${API_BASE}/`, {
-          method: 'HEAD',
-          mode: 'cors'
-        })
-        console.log('API connection test:', testResponse.ok ? 'OK' : 'Failed')
-      } catch (err) {
-        console.warn('API connection test failed:', err.message)
-      }
-    }
-    testAPI()
-  }, [])
+  }, [filter])
 
   return (
     <>
@@ -199,7 +160,6 @@ export default function Search() {
               </button>
             )}
             <button 
-              ref={searchButtonRef}
               className="srh-search-btn"
               onClick={handleSearch}
               disabled={loading}
@@ -213,7 +173,7 @@ export default function Search() {
                 color: 'white',
                 fontWeight: 'bold',
                 height: '100%',
-                transition: 'opacity 0.2s',
+                transition: 'all 0.2s',
                 opacity: loading ? 0.6 : 1
               }}
             >
@@ -223,7 +183,7 @@ export default function Search() {
           
           {(searchQuery.trim() || hasFilters) && (
             <div className="srh-live-label">
-              Results for <span>"{searchQuery.trim() || 'All'}"</span>
+              Results for "{searchQuery.trim() || 'All'}"
               {hasFilters && <span style={{ fontSize: '12px', marginLeft: '8px' }}>with filters</span>}
             </div>
           )}
@@ -252,17 +212,18 @@ export default function Search() {
               title="Search Failed" 
               body={
                 <div>
-                  <p>{error}</p>
+                  <p style={{ color: '#ff6b6b' }}>{error}</p>
                   <button 
                     onClick={handleSearch}
                     style={{
                       marginTop: '16px',
-                      padding: '8px 16px',
+                      padding: '8px 24px',
                       background: 'var(--accent, #ff6b00)',
                       border: 'none',
                       borderRadius: '6px',
                       color: 'white',
-                      cursor: 'pointer'
+                      cursor: 'pointer',
+                      fontWeight: 'bold'
                     }}
                   >
                     Try Again
@@ -275,7 +236,7 @@ export default function Search() {
           <div className="grid">
             <Empty 
               title="No Results Found" 
-              body={`Couldn't find any anime matching "${searchQuery.trim()}". Try a different name or check your spelling.`} 
+              body={`Couldn't find any anime matching "${searchQuery.trim()}". Try a different name.`} 
             />
           </div>
         ) : (
@@ -286,13 +247,16 @@ export default function Search() {
                   key={m.id} 
                   m={m} 
                   delay={i < 24 ? i * 34 : 0}
-                  onClick={() => go('watch', { 
-                    id: m.id, 
-                    name: m.title.romaji, 
-                    titleAlt: m.title.romaji, 
-                    ep: 1, 
-                    lang: 'sub' 
-                  })}
+                  onClick={() => {
+                    const cleanId = m.id.split('?')[0]
+                    go('watch', { 
+                      id: cleanId, 
+                      name: m.title.romaji, 
+                      titleAlt: m.title.romaji, 
+                      ep: 1, 
+                      lang: 'sub' 
+                    })
+                  }}
                 />
               ))}
             </div>
@@ -319,16 +283,6 @@ export default function Search() {
           </>
         )}
       </div>
-      
-      <style jsx>{`
-        .srh-search-btn:hover:not(:disabled) {
-          opacity: 0.9;
-          transform: translateY(-1px);
-        }
-        .srh-search-btn:active:not(:disabled) {
-          transform: translateY(0);
-        }
-      `}</style>
     </>
   )
 }
