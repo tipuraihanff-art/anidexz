@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../AppContext.jsx'
 import { buildURL } from '../AppContext.jsx'
-import { Card, Skels, Empty, Sentinel, GenreRow } from '../components/Shared.jsx'
+import { Card, Skels, Empty, Sentinel } from '../components/Shared.jsx'
 
 const API_BASE = 'https://anidexz-api.vercel.app/aniwatch'
 
@@ -14,7 +14,6 @@ export default function Search() {
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState(null)
-  const [genres, setGenres] = useState([])
   const inputRef = useRef(null)
 
   const hasFilters = !!(filter.genre || filter.type || filter.status || filter.year || filter.score)
@@ -84,10 +83,6 @@ export default function Search() {
 
       setItems(prev => resetPage ? transformedAnimes : [...prev, ...transformedAnimes])
       setHasMore(data.hasNextPage || false)
-      
-      if (data.genres && resetPage) {
-        setGenres(data.genres)
-      }
       
       if (resetPage) {
         setPage(2)
@@ -164,20 +159,33 @@ export default function Search() {
               onClick={handleSearch}
               disabled={loading}
               style={{
-                background: 'var(--accent, #ff6b00)',
+                background: 'transparent',
                 border: 'none',
                 borderRadius: '0 8px 8px 0',
-                padding: '0 20px',
+                padding: '0 16px',
                 marginLeft: 'auto',
                 cursor: loading ? 'not-allowed' : 'pointer',
-                color: 'white',
-                fontWeight: 'bold',
+                color: 'var(--dim)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 height: '100%',
                 transition: 'all 0.2s',
                 opacity: loading ? 0.6 : 1
               }}
+              onMouseEnter={(e) => {
+                if (!loading) {
+                  e.currentTarget.style.color = 'var(--fg)'
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = 'var(--dim)'
+              }}
             >
-              {loading ? '...' : 'Search'}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
             </button>
           </div>
           
@@ -191,12 +199,6 @@ export default function Search() {
       </div>
 
       <div className="sec">
-        <GenreRow
-          active={filter.genre}
-          onChange={g => setFilter(prev => ({ ...prev, genre: g }))}
-          customGenres={genres.length > 0 ? genres : undefined}
-        />
-        
         {!searchQuery.trim() && !hasFilters ? (
           <div className="grid">
             <Empty 
