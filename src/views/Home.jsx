@@ -6,7 +6,7 @@ import { Card, Section, HSection, Spin, Empty } from '../components/Shared.jsx'
 const BASE = 'https://anime-iota-one.vercel.app/aniwatch'
 
 async function fetchHome() {
-  const res = await fetch(`${BASE}/`)
+  const res = await fetch(BASE)
   if (!res.ok) throw new Error(`AniWatch home failed: ${res.status}`)
   return res.json()
 }
@@ -26,7 +26,7 @@ function Hero({ list }) {
 
   if (!list.length) return null
   const m = list[idx]
-  const desc = (m.descriptions || '').replace(/<[^>]+>/g, '').trim()
+  const desc = (m.description || '').replace(/<[^>]+>/g, '').trim()
 
   return (
     <div className="hero">
@@ -161,7 +161,7 @@ export default function Home() {
   if (error)   return <div id="app"><Empty title="Failed to Load" body={error} /></div>
 
   const {
-    spotlightAnimes    = [],
+    spotLightAnimes    = [],
     trendingAnimes     = [],
     latestEpisodes     = [],
     top10Animes        = {},
@@ -169,16 +169,16 @@ export default function Home() {
     topUpcomingAnimes  = [],
   } = data
 
-  const top10Day      = top10Animes.day  || []
-  const topAiring     = featuredAnimes.topAiringAnimes      || []
-  const mostPopular   = featuredAnimes.mostPopularAnimes    || []
-  const mostFavorite  = featuredAnimes.mostFavoriteAnimes   || []
-  const latestCompleted = featuredAnimes.latestCompletedAnimes || []
+  const top10Day        = top10Animes.day                        || []
+  const topAiring       = featuredAnimes.topAiringAnimes         || []
+  const mostPopular     = featuredAnimes.mostPopularAnimes       || []
+  const mostFavorite    = featuredAnimes.mostFavoriteAnimes      || []
+  const latestCompleted = featuredAnimes.latestCompletedAnimes   || []
 
   return (
     <div>
       {/* HERO — spotlight */}
-      {spotlightAnimes.length > 0 && <Hero list={spotlightAnimes.slice(0, 8)} />}
+      {spotLightAnimes.length > 0 && <Hero list={spotLightAnimes.slice(0, 8)} />}
 
       {/* LATEST EPISODES — horizontal strip */}
       {latestEpisodes.length > 0 && (
