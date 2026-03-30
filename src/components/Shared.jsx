@@ -3,6 +3,7 @@ import { alImg, alTitle, alTitleAlt, scoreDisp, fmtFormat } from '../helpers.js'
 import { isWL, toggleWL, getCW } from '../storage.js'
 import { useApp } from '../AppContext.jsx'
 import { GENRES } from '../helpers.js'
+import { resolveAniWatchId } from '../api.js'
 
 /* ── Spinner ── */
 export function Spin() {
@@ -33,9 +34,10 @@ export function HeartSVG({ on }) {
 
 /* ── Anime Card ── */
 export function Card({ m, delay = 0 }) {
-  const { go, toast } = useApp()
+  const { go, toast, pbStart, pbDone } = useApp()
   const [inWl, setInWl] = useState(() => isWL(m.id))
   const [animated, setAnimated] = useState(false)
+  const [resolving, setResolving] = useState(false)
   const ref = useRef(null)
 
   useEffect(() => {
@@ -49,7 +51,6 @@ export function Card({ m, delay = 0 }) {
   const fmt = fmtFormat(m.format)
   const poster = alImg(m)
 
-  // Episode progress from Continue Watching
   const cwEntry = getCW().find(c => c.id === m.id) || null
   const totalEps = m.episodes || 0
   const watchedEp = cwEntry ? cwEntry.ep : 0
@@ -62,12 +63,45 @@ export function Card({ m, delay = 0 }) {
     toast(added ? 'Added to My List' : 'Removed from My List')
   }
 
+  async function handleClick() {
+    if (resolving) return
+
+    const id = m.id
+
+    // AniWatch slugs are strings like "one-piece"
+    // AniList IDs are numbers (21) or numeric strings ("21")
+    if (typeof id === 'string' && isNaN(Number(id))) {
+      go('anime', { id, name: title, titleAlt })
+      return
+    }
+
+    // AniList numeric ID — resolve to AniWatch slug first
+    setResolving(true)
+    pbStart()
+    try {
+      const awId = await resolveAniWatchId(title)
+      go('anime', { id: awId, name: title, titleAlt })
+    } catch {
+      // Retry with romaji if english title failed
+      try {
+        const fallback = m.title?.romaji || title
+        const awId = await resolveAniWatchId(fallback)
+        go('anime', { id: awId, name: fallback, titleAlt })
+      } catch {
+        toast('Could not find this anime — try searching directly')
+        pbDone()
+      }
+    } finally {
+      setResolving(false)
+    }
+  }
+
   return (
     <div
       ref={ref}
-      className={'card' + (animated ? ' in' : '')}
-      style={{ animationDelay: delay + 'ms' }}
-      onClick={() => go('anime', { id: m.id, name: title, titleAlt })}
+      className={'card' + (animated ? ' in' : '') + (resolving ? ' resolving' : '')}
+      style={{ animationDelay: delay + 'ms', opacity: resolving ? 0.6 : 1, transition: 'opacity 0.2s' }}
+      onClick={handleClick}
     >
       {fmt && <span className="cbadge l">{fmt}</span>}
       {score && score !== 'N/A' && <span className="cbadge r">★ {score}</span>}
