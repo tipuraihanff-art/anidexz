@@ -1,15 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useApp } from '../AppContext.jsx'
-import { alQuery, Q_SUGGEST } from '../api.js'
-
-function useDebouncedValue(value, delay) {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(t)
-  }, [value, delay])
-  return debounced
-}
 
 export default function Header({ onRandom }) {
   const { route, go, filter, setFilter } = useApp()
@@ -23,67 +13,28 @@ export default function Header({ onRandom }) {
     document.documentElement.classList.toggle('light', isLight)
     try { localStorage.setItem('anz_theme', isLight ? 'light' : 'dark') } catch {}
   }, [isLight])
+  
   const [aspOpen, setAspOpen] = useState(false)
   const [aspType, setAspType] = useState('')
   const [aspStatus, setAspStatus] = useState('')
   const [aspYear, setAspYear] = useState('')
   const [aspScore, setAspScore] = useState('')
   const [aspOrder, setAspOrder] = useState('SCORE_DESC')
-  const [suggestions, setSuggestions] = useState([])
-  const [sugOpen, setSugOpen] = useState(false)
-  const [sugLoading, setSugLoading] = useState(false)
   const aspRef = useRef(null)
-  const swRef = useRef(null)
-  const reqId = useRef(0)
 
   const view = route.view
-  const debouncedQ = useDebouncedValue(q, 280)
-
-  /* Live suggestions */
-  useEffect(() => {
-    const trimmed = debouncedQ.trim()
-    if (trimmed.length < 2) { setSuggestions([]); setSugOpen(false); return }
-    const id = ++reqId.current
-    setSugLoading(true)
-    alQuery(Q_SUGGEST(), { search: trimmed })
-      .then(d => {
-        if (id !== reqId.current) return
-        setSuggestions((d?.Page?.media) || [])
-        setSugOpen(true)
-        setSugLoading(false)
-      })
-      .catch(() => { setSugLoading(false) })
-  }, [debouncedQ])
-
-  /* Close dropdowns on outside click */
-  useEffect(() => {
-    function handleClick(e) {
-      if (aspOpen && aspRef.current && !aspRef.current.contains(e.target)) setAspOpen(false)
-      if (sugOpen && swRef.current && !swRef.current.contains(e.target)) setSugOpen(false)
-      if (drawerOpen) setDrawerOpen(false)
-    }
-    document.addEventListener('click', handleClick)
-    return () => document.removeEventListener('click', handleClick)
-  }, [aspOpen, sugOpen, drawerOpen])
 
   function doSearch() {
     const trimmed = q.trim()
     if (!trimmed && !hasFilters()) return
-    setSugOpen(false)
     go('search', { q: trimmed })
   }
 
-  function pickSuggestion(m) {
-    setSugOpen(false)
-    setQ('')
-    go('anime', { id: m.id, name: m.title?.english || m.title?.romaji, titleAlt: m.title?.romaji || m.title?.english })
-  }
-
-  function showAll() {
-    const trimmed = q.trim()
-    if (!trimmed) return
-    setSugOpen(false)
-    go('search', { q: trimmed })
+  function handleKeyPress(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      doSearch()
+    }
   }
 
   function hasFilters() {
@@ -103,6 +54,16 @@ export default function Header({ onRandom }) {
     setAspType(''); setAspStatus(''); setAspYear(''); setAspScore(''); setAspOrder('SCORE_DESC')
     setAspOpen(false)
   }
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClick(e) {
+      if (aspOpen && aspRef.current && !aspRef.current.contains(e.target)) setAspOpen(false)
+      if (drawerOpen) setDrawerOpen(false)
+    }
+    document.addEventListener('click', handleClick)
+    return () => document.removeEventListener('click', handleClick)
+  }, [aspOpen, drawerOpen])
 
   const navItems = [
     { v: 'home', label: 'Home' },
@@ -192,21 +153,23 @@ export default function Header({ onRandom }) {
           </svg>
           Random
         </button>
-        {/* Search wrapper with live suggestions */}
-        <div className="sw" ref={swRef} style={{ position: 'relative', overflow: 'visible' }} onClick={e => e.stopPropagation()}>
+        
+        {/* Search input without live suggestions */}
+        <div className="sw" style={{ position: 'relative', overflow: 'visible' }} onClick={e => e.stopPropagation()}>
           <input
-            id="si" type="search" placeholder="Search anime..."
+            id="si" 
+            type="search" 
+            placeholder="Search anime..."
             value={q}
-            onChange={e => { setQ(e.target.value); if (e.target.value.trim().length < 2) { setSugOpen(false); setSuggestions([]) } }}
-            onKeyDown={e => { if (e.key === 'Enter') doSearch(); if (e.key === 'Escape') setSugOpen(false) }}
-            onFocus={() => { if (suggestions.length && q.trim().length >= 2) setSugOpen(true) }}
+            onChange={e => setQ(e.target.value)}
+            onKeyPress={handleKeyPress}
             autoComplete="off"
           />
           <button
             id="asearch-btn"
             className={aspOpen ? 'on' : ''}
             title="Advanced Filters"
-            onClick={e => { e.stopPropagation(); setAspOpen(v => !v); setSugOpen(false) }}
+            onClick={e => { e.stopPropagation(); setAspOpen(v => !v) }}
           >
             <svg fill="none" height="14" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="14">
               <line x1="4" x2="20" y1="6" y2="6" /><line x1="8" x2="16" y1="12" y2="12" />
@@ -218,39 +181,6 @@ export default function Header({ onRandom }) {
               <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
             </svg>
           </button>
-
-          {/* Live suggestion dropdown */}
-          {sugOpen && (suggestions.length > 0 || sugLoading) && (
-            <div className="sug-drop">
-              {sugLoading && !suggestions.length ? (
-                <div className="sug-loading">Searching...</div>
-              ) : (
-                <>
-                  {suggestions.map(m => {
-                    const title = m.title?.english || m.title?.romaji || 'Unknown'
-                    const fmt = m.format ? m.format.replace(/_/g, ' ') : ''
-                    return (
-                      <div key={m.id} className="sug-item" onMouseDown={e => { e.preventDefault(); pickSuggestion(m) }}>
-                        <img
-                          src={m.coverImage?.medium || ''}
-                          alt={title}
-                          className="sug-img"
-                          onError={e => { e.target.style.display = 'none' }}
-                        />
-                        <div className="sug-info">
-                          <div className="sug-title">{title}</div>
-                          {fmt && <div className="sug-fmt">{fmt}</div>}
-                        </div>
-                      </div>
-                    )
-                  })}
-                  <button className="sug-all" onMouseDown={e => { e.preventDefault(); showAll() }}>
-                    Show all results for "{q.trim()}"
-                  </button>
-                </>
-              )}
-            </div>
-          )}
         </div>
 
         <button id="theme-btn" onClick={() => setIsLight(v => !v)} title={isLight ? 'Switch to Dark' : 'Switch to Light'}>
