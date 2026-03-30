@@ -63,66 +63,6 @@ function Hero({ list }) {
   )
 }
 
-/* ─── Latest Episode Card (horizontal strip) ───────────────── */
-function LatestEpCard({ item }) {
-  const { go } = useApp()
-  const epNum = item.episodes?.eps || item.episodes?.sub || 1
-
-  return (
-    <div
-      className="hcard"
-      style={{ width: '130px', flexShrink: 0, cursor: 'pointer' }}
-      onClick={() => go('watch', { id: item.id, name: item.name, titleAlt: item.name, ep: epNum })}
-    >
-      <div className="ep-badge">EP {epNum}</div>
-      <img
-        src={item.img}
-        alt={item.name}
-        loading="lazy"
-        style={{ width: '130px', height: '80px', objectFit: 'cover', display: 'block' }}
-        onError={e => { e.target.src = 'https://placehold.co/130x80/0d0d15/555577?text=N/A' }}
-      />
-      <div className="hcard-info">
-        <div className="hcard-title">{item.name}</div>
-        <div className="hcard-sub">{item.duration || ''}</div>
-      </div>
-    </div>
-  )
-}
-
-/* ─── Ranked Card ───────────────────────────────────────────── */
-function RankedCard({ item, rank }) {
-  const { go } = useApp()
-  return (
-    <div
-      className="hcard"
-      style={{ position: 'relative', cursor: 'pointer' }}
-      onClick={() => go('anime', { id: item.id, name: item.name, titleAlt: item.name })}
-    >
-      <div style={{
-        position: 'absolute', top: 0, left: 0,
-        background: 'var(--accent, #7c3aed)',
-        color: '#fff', fontWeight: 700,
-        fontSize: rank <= 3 ? '18px' : '14px',
-        width: '28px', height: '28px',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        borderRadius: '0 0 6px 0', zIndex: 2,
-      }}>{rank}</div>
-      <img
-        src={item.img}
-        alt={item.name}
-        loading="lazy"
-        style={{ width: '108px', height: '152px', objectFit: 'cover' }}
-        onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }}
-      />
-      <div className="hcard-info">
-        <div className="hcard-title">{item.name}</div>
-        <div className="hcard-sub">{item.episodes ? `EP ${item.episodes.eps || item.episodes.sub || '?'}` : ''}</div>
-      </div>
-    </div>
-  )
-}
-
 /* ─── Home ──────────────────────────────────────────────────── */
 export default function Home() {
   const { go, pbStart, pbDone } = useApp()
@@ -145,7 +85,6 @@ export default function Home() {
   const {
     spotLightAnimes   = [],
     trendingAnimes    = [],
-    latestEpisodes    = [],
     top10Animes       = {},
     featuredAnimes    = {},
     topUpcomingAnimes = [],
@@ -162,25 +101,12 @@ export default function Home() {
       {/* HERO */}
       {spotLightAnimes.length > 0 && <Hero list={spotLightAnimes.slice(0, 8)} />}
 
-      {/* LATEST EPISODES — horizontal strip */}
-      {latestEpisodes.length > 0 && (
-        <Section title="Latest Episodes">
-          <div className="hscroll-outer">
-            <div className="hscroll">
-              {latestEpisodes.map((item, i) => (
-                <LatestEpCard key={item.id + '-' + i} item={item} />
-              ))}
-            </div>
-          </div>
-        </Section>
-      )}
-
-      {/* LATEST EPISODES — grid */}
-      {latestEpisodes.length > 0 && (
-        <Section title="Latest Released Episodes" viewAll="updated">
+      {/* TRENDING NOW */}
+      {trendingAnimes.length > 0 && (
+        <Section title="Trending Now" viewAll="trending">
           <div className="grid">
-            {latestEpisodes.slice(0, 18).map((item, i) => (
-              <Card key={item.id + '-g-' + i} m={aw(item)} delay={i * 34} />
+            {trendingAnimes.map((item, i) => (
+              <Card key={item.id} m={aw(item)} delay={i * 34} />
             ))}
           </div>
         </Section>
@@ -189,25 +115,10 @@ export default function Home() {
       {/* TOP 10 TODAY */}
       {top10Day.length > 0 && (
         <Section title="Top 10 Today">
-          <div className="hscroll-outer">
-            <div className="hscroll">
-              {top10Day.slice(0, 10).map((item, i) => (
-                <RankedCard key={item.id} item={item} rank={i + 1} />
-              ))}
-            </div>
-          </div>
-        </Section>
-      )}
-
-      {/* TRENDING — horizontal scroll */}
-      {trendingAnimes.length > 0 && (
-        <Section title="Trending Now" viewAll="trending">
-          <div className="hscroll-outer">
-            <div className="hscroll">
-              {trendingAnimes.map((item, i) => (
-                <RankedCard key={item.id} item={item} rank={i + 1} />
-              ))}
-            </div>
+          <div className="grid">
+            {top10Day.slice(0, 10).map((item, i) => (
+              <Card key={item.id} m={aw(item)} delay={i * 34} />
+            ))}
           </div>
         </Section>
       )}
