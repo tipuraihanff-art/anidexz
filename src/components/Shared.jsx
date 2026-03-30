@@ -80,12 +80,14 @@ export function Card({ m, delay = 0 }) {
     pbStart()
     try {
       const awId = await resolveAniWatchId(title)
+      pbDone()
       go('anime', { id: awId, name: title, titleAlt })
     } catch {
       // Retry with romaji if english title failed
       try {
         const fallback = m.title?.romaji || title
         const awId = await resolveAniWatchId(fallback)
+        pbDone()
         go('anime', { id: awId, name: fallback, titleAlt })
       } catch {
         toast('Could not find this anime — try searching directly')
