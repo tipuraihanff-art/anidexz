@@ -11,6 +11,20 @@ async function fetchHome() {
   return res.json()
 }
 
+// Adapt AniWatch item shape → Card-compatible shape
+function aw(item) {
+  return {
+    id: item.id,
+    title: { romaji: item.name, english: item.name },
+    coverImage: { large: item.img, extraLarge: item.img },
+    bannerImage: item.img,
+    format: item.category || null,
+    averageScore: null,
+    episodes: item.episodes?.eps || item.episodes?.sub || null,
+    description: item.description || null,
+  }
+}
+
 /* ─── Hero ─────────────────────────────────────────────────── */
 function Hero({ list }) {
   const { go } = useApp()
@@ -52,8 +66,7 @@ function Hero({ list }) {
 /* ─── Latest Episode Card (horizontal strip) ───────────────── */
 function LatestEpCard({ item }) {
   const { go } = useApp()
-  const eps = item.episodes || {}
-  const epNum = eps.eps || eps.sub || 1
+  const epNum = item.episodes?.eps || item.episodes?.sub || 1
 
   return (
     <div
@@ -104,38 +117,7 @@ function RankedCard({ item, rank }) {
       />
       <div className="hcard-info">
         <div className="hcard-title">{item.name}</div>
-        <div className="hcard-sub">{item.episodes ? `EP ${item.episodes.eps || '?'}` : ''}</div>
-      </div>
-    </div>
-  )
-}
-
-/* ─── Generic AniWatch Card ─────────────────────────────────── */
-function AWCard({ item, delay = 0 }) {
-  const { go } = useApp()
-  const eps = item.episodes || {}
-  const sub = [
-    eps.eps ? `EP ${eps.eps}` : null,
-    item.duration || null,
-    item.rated ? '18+' : null,
-  ].filter(Boolean).join(' · ')
-
-  return (
-    <div
-      className="hcard"
-      style={{ cursor: 'pointer', animationDelay: `${delay}ms` }}
-      onClick={() => go('anime', { id: item.id, name: item.name, titleAlt: item.name })}
-    >
-      <img
-        src={item.img}
-        alt={item.name}
-        loading="lazy"
-        style={{ width: '108px', height: '152px', objectFit: 'cover' }}
-        onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }}
-      />
-      <div className="hcard-info">
-        <div className="hcard-title">{item.name}</div>
-        {sub && <div className="hcard-sub">{sub}</div>}
+        <div className="hcard-sub">{item.episodes ? `EP ${item.episodes.eps || item.episodes.sub || '?'}` : ''}</div>
       </div>
     </div>
   )
@@ -161,23 +143,23 @@ export default function Home() {
   if (error)   return <div id="app"><Empty title="Failed to Load" body={error} /></div>
 
   const {
-    spotLightAnimes    = [],
-    trendingAnimes     = [],
-    latestEpisodes     = [],
-    top10Animes        = {},
-    featuredAnimes     = {},
-    topUpcomingAnimes  = [],
+    spotLightAnimes   = [],
+    trendingAnimes    = [],
+    latestEpisodes    = [],
+    top10Animes       = {},
+    featuredAnimes    = {},
+    topUpcomingAnimes = [],
   } = data
 
-  const top10Day        = top10Animes.day                        || []
-  const topAiring       = featuredAnimes.topAiringAnimes         || []
-  const mostPopular     = featuredAnimes.mostPopularAnimes       || []
-  const mostFavorite    = featuredAnimes.mostFavoriteAnimes      || []
-  const latestCompleted = featuredAnimes.latestCompletedAnimes   || []
+  const top10Day        = top10Animes.day                      || []
+  const topAiring       = featuredAnimes.topAiringAnimes       || []
+  const mostPopular     = featuredAnimes.mostPopularAnimes     || []
+  const mostFavorite    = featuredAnimes.mostFavoriteAnimes    || []
+  const latestCompleted = featuredAnimes.latestCompletedAnimes || []
 
   return (
     <div>
-      {/* HERO — spotlight */}
+      {/* HERO */}
       {spotLightAnimes.length > 0 && <Hero list={spotLightAnimes.slice(0, 8)} />}
 
       {/* LATEST EPISODES — horizontal strip */}
@@ -198,29 +180,7 @@ export default function Home() {
         <Section title="Latest Released Episodes" viewAll="updated">
           <div className="grid">
             {latestEpisodes.slice(0, 18).map((item, i) => (
-              <div
-                key={item.id + '-g-' + i}
-                className="hcard"
-                style={{ cursor: 'pointer' }}
-                onClick={() => {
-                  const epNum = item.episodes?.eps || item.episodes?.sub || 1
-                  go('watch', { id: item.id, name: item.name, titleAlt: item.name, ep: epNum })
-                }}
-              >
-                <img
-                  src={item.img}
-                  alt={item.name}
-                  loading="lazy"
-                  style={{ width: '130px', height: '80px', objectFit: 'cover', display: 'block' }}
-                  onError={e => { e.target.src = 'https://placehold.co/130x80/0d0d15/555577?text=N/A' }}
-                />
-                <div className="hcard-info">
-                  <div className="hcard-title">{item.name}</div>
-                  <div className="hcard-sub">
-                    EP {item.episodes?.eps || item.episodes?.sub || '?'} · {item.duration || 'Latest Episode'}
-                  </div>
-                </div>
-              </div>
+              <Card key={item.id + '-g-' + i} m={aw(item)} delay={i * 34} />
             ))}
           </div>
         </Section>
@@ -239,29 +199,13 @@ export default function Home() {
         </Section>
       )}
 
-      {/* TRENDING */}
+      {/* TRENDING — horizontal scroll */}
       {trendingAnimes.length > 0 && (
         <Section title="Trending Now" viewAll="trending">
           <div className="hscroll-outer">
             <div className="hscroll">
               {trendingAnimes.map((item, i) => (
-                <div
-                  key={item.id}
-                  className="hcard"
-                  style={{ cursor: 'pointer', flexShrink: 0 }}
-                  onClick={() => go('anime', { id: item.id, name: item.name, titleAlt: item.name })}
-                >
-                  <img
-                    src={item.img}
-                    alt={item.name}
-                    loading="lazy"
-                    style={{ width: '108px', height: '152px', objectFit: 'cover' }}
-                    onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }}
-                  />
-                  <div className="hcard-info">
-                    <div className="hcard-title">{item.name}</div>
-                  </div>
-                </div>
+                <RankedCard key={item.id} item={item} rank={i + 1} />
               ))}
             </div>
           </div>
@@ -273,7 +217,7 @@ export default function Home() {
         <Section title="Top Airing" viewAll="top-airing">
           <div className="grid">
             {topAiring.slice(0, 18).map((item, i) => (
-              <AWCard key={item.id} item={item} delay={i * 34} />
+              <Card key={item.id} m={aw(item)} delay={i * 34} />
             ))}
           </div>
         </Section>
@@ -284,7 +228,7 @@ export default function Home() {
         <Section title="Most Popular" viewAll="most-popular">
           <div className="grid">
             {mostPopular.slice(0, 12).map((item, i) => (
-              <AWCard key={item.id} item={item} delay={i * 34} />
+              <Card key={item.id} m={aw(item)} delay={i * 34} />
             ))}
           </div>
         </Section>
@@ -295,18 +239,18 @@ export default function Home() {
         <Section title="Most Favourite" viewAll="most-favourite">
           <div className="grid">
             {mostFavorite.slice(0, 12).map((item, i) => (
-              <AWCard key={item.id} item={item} delay={i * 34} />
+              <Card key={item.id} m={aw(item)} delay={i * 34} />
             ))}
           </div>
         </Section>
       )}
 
-      {/* TOP UPCOMING */}
+      {/* MOST ANTICIPATED */}
       {topUpcomingAnimes.length > 0 && (
         <Section title="Most Anticipated" viewAll="upcoming">
           <div className="grid">
             {topUpcomingAnimes.slice(0, 12).map((item, i) => (
-              <AWCard key={item.id} item={item} delay={i * 34} />
+              <Card key={item.id} m={aw(item)} delay={i * 34} />
             ))}
           </div>
         </Section>
@@ -317,7 +261,7 @@ export default function Home() {
         <Section title="Completed Series" viewAll="completed">
           <div className="grid">
             {latestCompleted.slice(0, 12).map((item, i) => (
-              <AWCard key={item.id} item={item} delay={i * 34} />
+              <Card key={item.id} m={aw(item)} delay={i * 34} />
             ))}
           </div>
         </Section>
@@ -333,9 +277,7 @@ export default function Home() {
               onClick={() => go('watch', { id: item.id, name: item.title, titleAlt: item.titleAlt, ep: item.ep, lang: item.lang })}
             >
               <img
-                src={item.poster}
-                alt={item.title}
-                loading="lazy"
+                src={item.poster} alt={item.title} loading="lazy"
                 style={{ width: '108px', height: '152px', objectFit: 'cover' }}
                 onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }}
               />
@@ -358,9 +300,7 @@ export default function Home() {
               onClick={() => go('anime', { id: item.id, name: item.title, titleAlt: item.titleAlt || item.title })}
             >
               <img
-                src={item.poster}
-                alt={item.title}
-                loading="lazy"
+                src={item.poster} alt={item.title} loading="lazy"
                 style={{ width: '108px', height: '152px', objectFit: 'cover' }}
                 onError={e => { e.target.src = 'https://placehold.co/108x152/0d0d15/555577?text=N/A' }}
               />
